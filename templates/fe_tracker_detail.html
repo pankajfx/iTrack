@@ -14,7 +14,6 @@
 {% endblock %}
 
 {% block content %}
-<script src="{{ url_for('static', filename='js/realtime_handler.js') }}"></script>
 <script>
     const trackerId  = '{{ tracker_id }}';
     window.currentTrackerId = trackerId;  // Make available to realtime_handler.js
@@ -435,8 +434,6 @@ let trackerData = null;
 // ─── Load & Render ──────────────────────────────────────────────────────────
 async function loadTracker() {
     console.log('[API] Loading tracker from API');
-    window.RealtimeHandler.lastUpdateSource = 'api';
-    
     try {
         const res  = await fetch(`/api/trackers/${trackerId}`);
         const data = await res.json();
@@ -867,6 +864,7 @@ function callNOC() {
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 function calculateProgress() {
+    if (trackerData.status === 'installation_complete') return 100;
     const stages = (trackerData.events || []).map(e => e.stage);
     let done = 0;
     if (stages.includes('tracker_created'))  done++;
@@ -974,16 +972,11 @@ function handleFETrackerUpdate(data) {
     // Check if complete tracker data is available
     if (data.tracker && config.mode !== 'api') {
         // Socket.IO-first: Update directly from Socket.IO data
-        console.log('[Socket.IO] Updating tracker from Socket.IO data');
-        window.RealtimeHandler.lastUpdateSource = 'socket';
         trackerData = data.tracker;
         renderAll();
-        console.log('[Socket.IO] Update complete');
     } else if (config.mode === 'hybrid') {
         // Hybrid mode: Try Socket.IO, fallback to API
         if (data.tracker) {
-            console.log('[Socket.IO] Updating tracker from Socket.IO data');
-            window.RealtimeHandler.lastUpdateSource = 'socket';
             trackerData = data.tracker;
             renderAll();
             console.log('[Socket.IO] Update complete');
@@ -998,19 +991,17 @@ function handleFETrackerUpdate(data) {
     }
 }
 
-// Join the tracker room for real-time updates
-if (typeof socket !== 'undefined') {
-    socket.emit('join_tracker', { tracker_id: trackerId });
-    
-    // Listen for tracker updates using custom FE handler
-    socket.on('tracker_update', handleFETrackerUpdate);
-    
-    // Listen for dashboard updates (might affect this tracker)
-    socket.on('dashboard_update', function(data) {
-        console.log('[Socket.IO] Dashboard update received');
-        loadTracker();
-    });
-}
+// ─── Socket.IO Setup ─────────────────────────────────────────────────────────
+// onSocketReady fires on every connect/reconnect so the room is re-joined
+// automatically after a network blip. Listeners are registered only once.
+var _feTrackerListenersAdded = false;
+window.onSocketReady(function() {
+    window.socket.emit('join_tracker', { tracker_id: trackerId });
+    if (!_feTrackerListenersAdded) {
+        _feTrackerListenersAdded = true;
+        window.socket.on('tracker_update', handleFETrackerUpdate);
+    }
+});
 
 // ─── Init ───────────────────────────────────────────────────────────────────
 loadTracker();

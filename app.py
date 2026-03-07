@@ -3041,5 +3041,6 @@ def broadcast_to_user(user_id, event_type, data):
 
 if __name__ == '__main__':
     # Use socketio.run() instead of app.run() for WebSocket support
-    socketio.run(app, debug=True, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    socketio.run(app, debug=debug, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
 

@@ -7,7 +7,21 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>{% block title %}SDWAN Tracker{% endblock %}</title>
-    
+
+    <!-- Socket.IO readiness infrastructure — must exist before the content block renders -->
+    <script>
+        window.socket = null;
+        window._socketReady = false;
+        window._socketCallbacks = [];
+        // Call fn() immediately if socket is already connected, otherwise queue it.
+        // The queued fn is also called on every subsequent reconnect, so room joins
+        // are automatically re-issued after a network blip.
+        window.onSocketReady = function(fn) {
+            window._socketCallbacks.push(fn);
+            if (window._socketReady) fn();
+        };
+    </script>
+
     <!-- Preload critical fonts -->
     <link rel="preload" href="/static/fonts/MaterialSymbolsOutlined.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="preload" href="/static/fonts/FjallaOne-Regular.ttf" as="font" type="font/ttf" crossorigin>
@@ -339,6 +353,12 @@
 <body class="bg-gray-50 min-h-screen">
     {% block content %}{% endblock %}
     
+    <!-- Socket.IO connection status indicator -->
+    <div id="socket-status-bar" class="fixed bottom-3 right-3 z-50 flex items-center gap-1.5 bg-white rounded-full px-2.5 py-1 shadow text-xs text-gray-500 opacity-0 transition-opacity duration-500 pointer-events-none">
+        <span id="socket-status-dot" class="w-2 h-2 rounded-full bg-gray-400"></span>
+        <span id="socket-status-label">Connecting</span>
+    </div>
+
     <!-- Toast Notification Container -->
     <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2 max-w-sm"></div>
     
@@ -516,50 +536,56 @@
     <!-- Socket.IO for real-time updates -->
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
     <script>
-        // Initialize Socket.IO connection
-        // Real-time configuration
         window.REALTIME_CONFIG = {
             mode: '{{ config.REALTIME_MODE }}',
             socketTimeout: {{ config.SOCKET_TIMEOUT }},
             includeFullData: {{ 'true' if config.SOCKET_INCLUDE_FULL_DATA else 'false' }}
         };
-        console.log('[Config] Real-time mode:', window.REALTIME_CONFIG.mode);
-        
-        let socket = null;
-        
-        function initSocketIO() {
-            if (socket && socket.connected) {
-                return socket; // Already connected
+
+        function _updateSocketStatus(connected) {
+            var dot   = document.getElementById('socket-status-dot');
+            var label = document.getElementById('socket-status-label');
+            var bar   = document.getElementById('socket-status-bar');
+            if (!dot) return;
+            if (connected) {
+                dot.className   = 'w-2 h-2 rounded-full bg-green-500';
+                label.textContent = 'Live';
+                bar.style.opacity = '0';
+            } else {
+                dot.className   = 'w-2 h-2 rounded-full bg-red-500 animate-pulse';
+                label.textContent = 'Reconnecting…';
+                bar.style.opacity = '1';
             }
-            
-            socket = io({
-                transports: ['websocket', 'polling'],
-                reconnection: true,
-                reconnectionDelay: 1000,
-                reconnectionAttempts: 5
-            });
-            
-            socket.on('connect', function() {
-                console.log('Socket.IO connected');
-            });
-            
-            socket.on('disconnect', function() {
-                console.log('Socket.IO disconnected');
-            });
-            
-            socket.on('connect_error', function(error) {
-                console.error('Socket.IO connection error:', error);
-            });
-            
-            return socket;
         }
-        
-        // Initialize on page load
-        document.addEventListener('DOMContentLoaded', function() {
-            initSocketIO();
+
+        // Connect immediately — io() is available because the CDN script above already ran.
+        window.socket = io({
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionAttempts: 10
+        });
+
+        window.socket.on('connect', function() {
+            console.log('[Socket.IO] Connected:', window.socket.id);
+            window._socketReady = true;
+            _updateSocketStatus(true);
+            // Fire every registered callback — covers both initial setup and reconnect room-rejoins.
+            window._socketCallbacks.forEach(function(fn) { fn(); });
+        });
+
+        window.socket.on('disconnect', function() {
+            console.log('[Socket.IO] Disconnected');
+            window._socketReady = false;
+            _updateSocketStatus(false);
+        });
+
+        window.socket.on('connect_error', function(err) {
+            console.error('[Socket.IO] Connection error:', err.message);
+            _updateSocketStatus(false);
         });
     </script>
-    
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

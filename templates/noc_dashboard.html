@@ -1218,32 +1218,31 @@
     loadNOCUsersCount();
     {% endif %}
 
-    // ─── Socket.IO Real-Time Updates ────────────────────────────────────────────
-    // Join the dashboard room for real-time updates
-    if (typeof socket !== 'undefined') {
-        socket.emit('join_dashboard', { role: '{{ session.role }}' });
-        
-        // Debounce dashboard reloads to avoid multiple rapid refreshes
-        let reloadTimeout = null;
-        function debouncedReload() {
-            if (reloadTimeout) clearTimeout(reloadTimeout);
-            reloadTimeout = setTimeout(() => {
-                loadTrackers();
-                loadReassignmentRequests();
-            }, 500); // Wait 500ms before reloading dashboard
-        }
-        
-        // Listen for dashboard updates (new trackers, assignments, status changes)
-        socket.on('dashboard_update', function(data) {
-            console.log('Dashboard update received via Socket.IO:', data);
-            debouncedReload();
-        });
-        
-        // Listen for tracker updates (might affect dashboard counts)
-        socket.on('tracker_update', function(data) {
-            console.log('Tracker updated via Socket.IO:', data);
-            debouncedReload();
-        });
+    // ─── Socket.IO Setup ─────────────────────────────────────────────────────────
+    let reloadTimeout = null;
+    function debouncedReload() {
+        if (reloadTimeout) clearTimeout(reloadTimeout);
+        reloadTimeout = setTimeout(function() {
+            loadTrackers();
+            loadReassignmentRequests();
+        }, 500);
     }
+    var _nocDashListenersAdded = false;
+    window.onSocketReady(function() {
+        window.socket.emit('join_dashboard', {
+            role: '{{ session.role }}',
+            user_id: '{{ session.user_id }}'
+        });
+        if (!_nocDashListenersAdded) {
+            _nocDashListenersAdded = true;
+            window.socket.on('dashboard_update', function(data) {
+                console.log('[Socket.IO] Dashboard update:', data.event_type);
+                debouncedReload();
+            });
+            window.socket.on('user_notification', function(data) {
+                console.log('[Socket.IO] User notification:', data.event_type);
+            });
+        }
+    });
 </script>
 {% endblock %}

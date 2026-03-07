@@ -16,7 +16,6 @@
 {% endblock %}
 
 {% block content %}
-<script src="{{ url_for('static', filename='js/realtime_handler.js') }}"></script>
 <script>
     const trackerId = '{{ tracker_id }}';
     window.currentTrackerId = trackerId;  // Make available to realtime_handler.js
@@ -616,8 +615,6 @@ let canAct = false;
 // ─── Bootstrap ─────────────────────────────────────────────────────────────
 async function loadTracker() {
     console.log('[API] Loading tracker from API');
-    window.RealtimeHandler.lastUpdateSource = 'api';
-    
     try {
         const res  = await fetch(`/api/trackers/${trackerId}`);
         const data = await res.json();
@@ -979,17 +976,22 @@ function renderQuickActions() {
         document.getElementById('pending-target-noc').textContent = reassignmentRequest.to_noc_name;
         document.getElementById('pending-reason').textContent = reassignmentRequest.reason;
         document.getElementById('pending-time').textContent = formatTimeAgo(reassignmentRequest.requested_at);
-        
+
         // Show revoke button
         revokeRequestBtn.classList.remove('hidden');
-        
+
         // Hide request transfer button
         requestTransferBtn.classList.add('hidden');
-        
+
         // Show locked message
         trackerLockedMsg.classList.remove('hidden');
-        
-        // Disable all other actions - return early
+
+        // Explicitly hide all action sections so stale visible state from previous renders is cleared
+        const readyBtn = document.getElementById('ready-btn');
+        const hsoSection = document.getElementById('hso-action-section');
+        if (readyBtn) readyBtn.classList.add('hidden');
+        if (hsoSection) hsoSection.classList.add('hidden');
+
         return;
     } else {
         // Hide pending request status
@@ -1196,8 +1198,9 @@ async function markReadyForCoordination() {
 }
 
 async function approveHSO() {
-    const remarks = prompt('Optional approval remarks (press Enter to skip):') || 'HSO approved';
-    if (remarks === null) return;  // user pressed Cancel
+    const input = prompt('Optional approval remarks (press Enter to skip):');
+    if (input === null) return;  // user pressed Cancel — do nothing
+    const remarks = input.trim() || 'HSO approved';
     await callApi(`/api/trackers/${trackerId}/hso/approve`, {remarks}, 'HSO approved. Installation complete!');
 }
 
@@ -1476,15 +1479,11 @@ function handleNOCTrackerUpdate(data) {
     // Check if complete tracker data is available
     if (data.tracker && config.mode !== 'api') {
         // Socket.IO-first: Update directly from Socket.IO data
-        console.log('[Socket.IO] Updating tracker from Socket.IO data');
-        window.RealtimeHandler.lastUpdateSource = 'socket';
         trackerData = data.tracker;
         renderAll();
     } else if (config.mode === 'hybrid') {
         // Hybrid mode: Try Socket.IO, fallback to API
         if (data.tracker) {
-            console.log('[Socket.IO] Updating tracker from Socket.IO data');
-            window.RealtimeHandler.lastUpdateSource = 'socket';
             trackerData = data.tracker;
             renderAll();
         } else {
@@ -1497,19 +1496,17 @@ function handleNOCTrackerUpdate(data) {
     }
 }
 
-// Join the tracker room for real-time updates
-if (typeof socket !== 'undefined') {
-    socket.emit('join_tracker', { tracker_id: trackerId });
-    
-    // Listen for tracker updates using custom NOC handler
-    socket.on('tracker_update', handleNOCTrackerUpdate);
-    
-    // Listen for dashboard updates (might affect this tracker)
-    socket.on('dashboard_update', function(data) {
-        console.log('[Socket.IO] Dashboard update received');
-        loadTracker();
-    });
-}
+// ─── Socket.IO Setup ─────────────────────────────────────────────────────────
+// onSocketReady fires on every connect/reconnect so the room is re-joined
+// automatically after a network blip. Listeners are registered only once.
+var _nocTrackerListenersAdded = false;
+window.onSocketReady(function() {
+    window.socket.emit('join_tracker', { tracker_id: trackerId });
+    if (!_nocTrackerListenersAdded) {
+        _nocTrackerListenersAdded = true;
+        window.socket.on('tracker_update', handleNOCTrackerUpdate);
+    }
+});
 
 // ─── Init ───────────────────────────────────────────────────────────────────
 loadTracker();

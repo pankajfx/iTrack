@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#14b8a6">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>{% block title %}SDWAN Tracker{% endblock %}</title>
+    
+    <!-- Preload critical fonts -->
+    <link rel="preload" href="/static/fonts/MaterialSymbolsOutlined.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="/static/fonts/FjallaOne-Regular.ttf" as="font" type="font/ttf" crossorigin>
+    
+    <link rel="stylesheet" href="/static/css/output.css">
+    <link rel="stylesheet" href="/static/css/fonts.css">
+    
+    <!-- Fallback to CDN if local font not available -->
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block" media="print" onload="this.media='all'; this.onload=null;">
+    
+    <style>
+        /* Hide body until fonts are loaded to prevent FOUC */
+        body {
+            opacity: 0;
+            transition: opacity 0.2s ease-in;
+        }
+        
+        body.fonts-loaded {
+            opacity: 1;
+        }
+        
+        /* Material Icons styling */
+        .material-symbols-outlined {
+            font-family: 'Material Symbols Outlined' !important;
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            vertical-align: middle;
+            font-display: block;
+            font-style: normal;
+            font-weight: normal;
+            line-height: 1;
+            text-transform: none;
+            letter-spacing: normal;
+            word-wrap: normal;
+            white-space: nowrap;
+            direction: ltr;
+            -webkit-font-smoothing: antialiased;
+            text-rendering: optimizeLegibility;
+            -moz-osx-font-smoothing: grayscale;
+            font-feature-settings: 'liga';
+        }
+        
+        .material-symbols-outlined.filled {
+            font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        
+        .material-symbols-outlined.icon-sm {
+            font-size: 18px;
+        }
+        
+        .material-symbols-outlined.icon-md {
+            font-size: 24px;
+        }
+        
+        .material-symbols-outlined.icon-lg {
+            font-size: 32px;
+        }
+        .fa-chart-line::before, .fas.fa-chart-line::before { content: "📈"; }
+        .fa-info-circle::before, .fas.fa-info-circle::before { content: "ℹ"; }
+        .fa-headset::before, .fas.fa-headset::before { content: "🎧"; }
+        .fa-clipboard-check::before, .fas.fa-clipboard-check::before { content: "📋"; }
+        .fa-bolt::before, .fas.fa-bolt::before { content: "⚡"; }
+        .fa-thumbs-up::before, .fas.fa-thumbs-up::before { content: "👍"; }
+        .fa-times-circle::before, .fas.fa-times-circle::before { content: "✕"; }
+        .fa-play::before, .fas.fa-play::before { content: "▶"; }
+        .fa-stop::before, .fas.fa-stop::before { content: "■"; }
+        .fa-redo::before, .fas.fa-redo::before { content: "↻"; }
+        .fa-question::before, .fas.fa-question::before { content: "?"; }
+        .fa-check-double::before, .fas.fa-check-double::before { content: "✓✓"; }
+        .fa-filter::before, .fas.fa-filter::before { content: "⊲"; }
+        .fa-calendar::before, .fas.fa-calendar::before { content: "📅"; }
+        .fa-search::before, .fas.fa-search::before { content: "🔍"; }
+        
+        /* Spinning animation */
+        .fa-spin {
+            animation: fa-spin 1s infinite linear;
+        }
+        
+        @keyframes fa-spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+        
+        /* Smooth scrolling */
+        html {
+            scroll-behavior: smooth;
+        }
+        
+        /* Mobile-first smooth animations */
+        .fade-in {
+            animation: fadeIn 0.4s ease-in;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(15px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .slide-up {
+            animation: slideUp 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        /* Custom scrollbar - minimal for mobile */
+        ::-webkit-scrollbar {
+            width: 4px;
+            height: 4px;
+        }
+        
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        
+        ::-webkit-scrollbar-thumb {
+            background: #14b8a6;
+            border-radius: 2px;
+        }
+        
+        ::-webkit-scrollbar-thumb:hover {
+            background: #0d9488;
+        }
+        
+        /* Ripple effect for buttons - mobile optimized */
+        .ripple {
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .ripple:after {
+            content: "";
+            display: block;
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+            background-image: radial-gradient(circle, #fff 10%, transparent 10.01%);
+            background-repeat: no-repeat;
+            background-position: 50%;
+            transform: scale(10, 10);
+            opacity: 0;
+            transition: transform .5s, opacity 1s;
+        }
+        
+        .ripple:active:after {
+            transform: scale(0, 0);
+            opacity: .3;
+            transition: 0s;
+        }
+        
+        /* Status badges - mobile optimized */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.625rem;
+            border-radius: 9999px;
+            font-size: 0.6875rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+        }
+        
+        /* Card hover effect - subtle for mobile */
+        .card-hover {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        @media (hover: hover) {
+            .card-hover:hover {
+                transform: translateY(-2px);
+                box-shadow: 0 12px 24px -5px rgba(0, 0, 0, 0.12), 0 6px 12px -5px rgba(0, 0, 0, 0.08);
+            }
+        }
+        
+        .card-hover:active {
+            transform: scale(0.98);
+        }
+        
+        /* Loading spinner */
+        .spinner {
+            border: 3px solid #f3f4f6;
+            border-top: 3px solid #14b8a6;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Safe area for mobile notches */
+        .safe-top {
+            padding-top: env(safe-area-inset-top);
+        }
+        
+        .safe-bottom {
+            padding-bottom: env(safe-area-inset-bottom);
+        }
+        
+        /* Floating Action Button */
+        .fab {
+            position: fixed;
+            bottom: 1.5rem;
+            right: 1.5rem;
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%);
+            box-shadow: 0 8px 16px rgba(20, 184, 166, 0.4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 40;
+        }
+        
+        .fab:active {
+            transform: scale(0.9);
+        }
+        
+        @media (hover: hover) {
+            .fab:hover {
+                transform: scale(1.1);
+                box-shadow: 0 12px 24px rgba(20, 184, 166, 0.5);
+            }
+        }
+        
+        /* Bottom navigation for mobile */
+        .bottom-nav {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-top: 1px solid #e5e7eb;
+            padding: 0.5rem 0;
+            padding-bottom: calc(0.5rem + env(safe-area-inset-bottom));
+            display: flex;
+            justify-content: space-around;
+            z-index: 50;
+            box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.05);
+        }
+        
+        .bottom-nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.5rem 1rem;
+            color: #6b7280;
+            font-size: 0.625rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.025em;
+            transition: all 0.2s;
+        }
+        
+        .bottom-nav-item.active {
+            color: #14b8a6;
+        }
+        
+        .bottom-nav-item i {
+            font-size: 1.25rem;
+        }
+        
+        /* Pull to refresh indicator */
+        .pull-refresh {
+            position: absolute;
+            top: -60px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: top 0.3s;
+        }
+        
+        /* Skeleton loading */
+        .skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+        
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        /* Compact header for mobile */
+        .mobile-header {
+            position: sticky;
+            top: 0;
+            z-index: 30;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+        }
+        
+        /* Improved touch targets */
+        /* button, a, .clickable {
+            min-height: 44px;
+            min-width: 44px;
+        } */
+        
+        /* Prevent text selection on buttons */
+        button, .btn {
+            -webkit-user-select: none;
+            user-select: none;
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="bg-gray-50 min-h-screen">
+    {% block content %}{% endblock %}
+    
+    <!-- Toast Notification Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2 max-w-sm"></div>
+    
+    <script>
+        // Toast notification function - mobile optimized
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const colors = {
+                success: 'bg-green-500',
+                error: 'bg-red-500',
+                warning: 'bg-yellow-500',
+                info: 'bg-blue-500'
+            };
+            
+            const icons = {
+                success: 'check_circle',
+                error: 'error',
+                warning: 'warning',
+                info: 'info'
+            };
+            
+            toast.className = `${colors[type]} text-white px-4 py-3 rounded-xl shadow-lg flex items-center gap-2 fade-in text-sm font-medium`;
+            toast.innerHTML = `
+                <span class="material-symbols-outlined icon-sm">${icons[type]}</span>
+                <span>${message}</span>
+            `;
+            
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateX(100%)';
+                toast.style.transition = 'all 0.3s ease';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+        
+        // Loading overlay - mobile optimized
+        function showLoading() {
+            const overlay = document.createElement('div');
+            overlay.id = 'loading-overlay';
+            overlay.className = 'fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50';
+            overlay.innerHTML = '<div class="spinner"></div>';
+            document.body.appendChild(overlay);
+        }
+        
+        function hideLoading() {
+            const overlay = document.getElementById('loading-overlay');
+            if (overlay) overlay.remove();
+        }
+        
+        // Format date/time to IST
+        function formatDateTime(isoString) {
+            if (!isoString) return '-';
+            const date = new Date(isoString);
+            return date.toLocaleString('en-IN', {
+                timeZone: 'Asia/Kolkata',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: true
+            });
+        }
+        
+        function formatTimeAgo(isoString) {
+            if (!isoString) return '-';
+            // Server sends UTC time, JavaScript Date automatically converts to local time
+            const date = new Date(isoString);
+            const now = new Date();
+            
+            const diffMs = now - date;
+            const seconds = Math.floor(diffMs / 1000);
+            
+            if (seconds < 60) return 'Just now';
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+            return `${Math.floor(seconds / 86400)}d ago`;
+        }
+        
+        // Haptic feedback for mobile
+        function hapticFeedback(type = 'light') {
+            if (navigator.vibrate) {
+                const patterns = {
+                    light: 10,
+                    medium: 20,
+                    heavy: 30
+                };
+                navigator.vibrate(patterns[type] || 10);
+            }
+        }
+        
+        // Pull to refresh functionality
+        let startY = 0;
+        let isPulling = false;
+        
+        document.addEventListener('touchstart', (e) => {
+            if (window.scrollY === 0) {
+                startY = e.touches[0].pageY;
+                isPulling = true;
+            }
+        });
+        
+        document.addEventListener('touchmove', (e) => {
+            if (!isPulling) return;
+            const currentY = e.touches[0].pageY;
+            const diff = currentY - startY;
+            
+            if (diff > 80) {
+                // Trigger refresh
+                isPulling = false;
+                if (typeof refreshData === 'function') {
+                    hapticFeedback('medium');
+                    refreshData();
+                }
+            }
+        });
+        
+        document.addEventListener('touchend', () => {
+            isPulling = false;
+        });
+    </script>
+    
+    <!-- Font Loading Script to Prevent FOUC -->
+    <script>
+        // Immediately add a loading class
+        document.documentElement.classList.add('fonts-loading');
+        
+        // Use Font Loading API to detect when fonts are ready
+        if ('fonts' in document) {
+            // Check if fonts are already loaded (from cache)
+            if (document.fonts.check('400 24px "Material Symbols Outlined"') && 
+                document.fonts.check('700 16px "Fjalla One"')) {
+                document.body.classList.add('fonts-loaded');
+                document.documentElement.classList.remove('fonts-loading');
+            } else {
+                // Wait for fonts to load
+                Promise.all([
+                    document.fonts.load('400 24px "Material Symbols Outlined"'),
+                    document.fonts.load('700 16px "Fjalla One"'),
+                    document.fonts.load('400 14px "Inter"')
+                ]).then(() => {
+                    document.body.classList.add('fonts-loaded');
+                    document.documentElement.classList.remove('fonts-loading');
+                }).catch(() => {
+                    // Fallback: show content after short delay even if fonts fail
+                    setTimeout(() => {
+                        document.body.classList.add('fonts-loaded');
+                        document.documentElement.classList.remove('fonts-loading');
+                    }, 300);
+                });
+            }
+        } else {
+            // Fallback for browsers without Font Loading API
+            window.addEventListener('load', () => {
+                setTimeout(() => {
+                    document.body.classList.add('fonts-loaded');
+                    document.documentElement.classList.remove('fonts-loading');
+                }, 100);
+            });
+        }
+        
+        // Safety fallback: always show content after 800ms max
+        setTimeout(() => {
+            if (!document.body.classList.contains('fonts-loaded')) {
+                document.body.classList.add('fonts-loaded');
+                document.documentElement.classList.remove('fonts-loading');
+            }
+        }, 800);
+    </script>
+    
+    <!-- Socket.IO for real-time updates -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" crossorigin="anonymous"></script>
+    <script>
+        // Initialize Socket.IO connection
+        // Real-time configuration
+        window.REALTIME_CONFIG = {
+            mode: '{{ config.REALTIME_MODE }}',
+            socketTimeout: {{ config.SOCKET_TIMEOUT }},
+            includeFullData: {{ 'true' if config.SOCKET_INCLUDE_FULL_DATA else 'false' }}
+        };
+        console.log('[Config] Real-time mode:', window.REALTIME_CONFIG.mode);
+        
+        let socket = null;
+        
+        function initSocketIO() {
+            if (socket && socket.connected) {
+                return socket; // Already connected
+            }
+            
+            socket = io({
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionAttempts: 5
+            });
+            
+            socket.on('connect', function() {
+                console.log('Socket.IO connected');
+            });
+            
+            socket.on('disconnect', function() {
+                console.log('Socket.IO disconnected');
+            });
+            
+            socket.on('connect_error', function(error) {
+                console.error('Socket.IO connection error:', error);
+            });
+            
+            return socket;
+        }
+        
+        // Initialize on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            initSocketIO();
+        });
+    </script>
+    
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

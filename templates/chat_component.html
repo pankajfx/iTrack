@@ -1,0 +1,859 @@
+<!-- Chat Component - Can be included in both NOC and FE pages -->
+<div id="chat-container" class="bg-white rounded-2xl shadow-md flex flex-col" style="height: 25rem;">
+    <!-- Chat Header -->
+    <div class="p-3 border-b bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-t-2xl">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <span class="material-symbols-outlined icon-md">chat</span>
+                <div>
+                    <h3 class="font-bold text-sm">Installation Chat</h3>
+                    <p class="text-xs text-teal-100" id="chat-status">Loading...</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <span id="unread-badge" class="hidden px-2 py-1 bg-red-500 text-white text-xs font-bold rounded-full"></span>
+                <button onclick="refreshChat()" class="h-8 w-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center hover:bg-opacity-30">
+                    <span class="material-symbols-outlined icon-sm"id="chat-refresh-icon">sync</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Locked Message -->
+    <div id="chat-locked" class="flex-1 flex items-center justify-center p-6 text-center">
+        <div>
+            <div class="mx-auto h-20 w-20 bg-gray-100 rounded-full flex items-center justify-center mb-4">
+                <span class="material-symbols-outlined icon-sm text-3xl text-gray-400">lock</span>
+            </div>
+            <h4 class="text-lg font-semibold text-gray-900 mb-2">Chat Locked</h4>
+            <p class="text-sm text-gray-600 max-w-sm">
+                Chat will unlock once NOC marks the installation as "Ready for Coordination".
+            </p>
+        </div>
+    </div>
+
+    <!-- Chat Messages -->
+    <div id="chat-messages" class="hidden flex-1 overflow-y-auto p-4 space-y-3" style="max-height: calc(600px - 125px);">
+        <!-- Messages will be inserted here -->
+    </div>
+
+    <!-- Chat Input -->
+    <div id="chat-input-container" class="hidden p-4 border-t bg-gray-50 rounded-b-2xl">
+        <!-- Row 1: Media Buttons -->
+        <div class="flex gap-2 mb-2">
+            <!-- Camera Capture -->
+            <button onclick="openCameraCapture()" 
+                class="h-10 w-10 bg-green-100 text-green-600 rounded-lg flex items-center justify-center hover:bg-green-200 transition-all"
+                title="Capture Photo">
+                <span class="material-symbols-outlined icon-sm">photo_camera</span>
+            </button>
+            
+            <!-- Image Upload -->
+            <button onclick="document.getElementById('chat-image-input').click()" 
+                class="h-10 w-10 bg-teal-100 text-teal-600 rounded-lg flex items-center justify-center hover:bg-teal-200 transition-all"
+                title="Upload Image">
+                <span class="material-symbols-outlined icon-sm">image</span>
+            </button>
+            <input type="file" id="chat-image-input" accept="image/*" class="hidden" onchange="handleImageUpload(event)">
+            
+            <!-- Audio Recording -->
+            <button onclick="toggleAudioRecording()" id="audio-record-btn"
+                class="h-10 w-10 bg-red-100 text-red-600 rounded-lg flex items-center justify-center hover:bg-red-200 transition-all"
+                title="Record Audio">
+                <span class="material-symbols-outlined icon-sm">mic</span>
+            </button>
+        </div>
+        
+        <!-- Row 2: Message Input & Send Button -->
+        <div class="flex gap-2">
+            <!-- Message Input -->
+            <input type="text" id="chat-message-input" 
+                placeholder="Type your message..."
+                class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-transparent text-sm"
+                onkeypress="if(event.key === 'Enter') sendMessage()">
+            
+            <!-- Send Button -->
+            <button onclick="sendMessage()" 
+                class="h-10 px-4 bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-lg font-semibold hover:shadow-lg transition-all flex items-center gap-1 flex-shrink-0">
+                <span class="material-symbols-outlined icon-sm">send</span>
+                <span class="hidden sm:inline">Send</span>
+            </button>
+        </div>
+        
+        <!-- Recording Indicator -->
+        <div id="recording-indicator" class="hidden p-3 bg-red-50 rounded-lg flex items-center justify-between mt-2">
+            <div class="flex items-center gap-2">
+                <div class="h-3 w-3 bg-red-500 rounded-full animate-pulse"></div>
+                <span class="text-sm text-red-700 font-semibold">Recording... <span id="recording-time">00:00</span></span>
+            </div>
+            <button onclick="stopAudioRecording()" class="px-4 py-1 bg-red-600 text-white rounded-lg text-sm font-semibold">
+                <span class="material-symbols-outlined icon-sm mr-1">stop</span>Stop
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Camera Capture Modal -->
+<div id="camera-capture-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">
+    <div class="w-full h-full flex flex-col">
+        <div class="flex justify-between items-center p-3 text-white">
+            <h3 class="text-sm font-semibold">Capture Photo</h3>
+            <button onclick="closeCameraCapture()" class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30">
+                <span class="material-symbols-outlined icon-sm">close</span>
+            </button>
+        </div>
+        <div class="flex-1 flex items-center justify-center">
+            <video id="camera-video" autoplay playsinline class="max-w-full max-h-full"></video>
+            <canvas id="camera-canvas" class="hidden"></canvas>
+            <img id="camera-preview" class="hidden max-w-full max-h-full">
+        </div>
+        <div class="p-4 space-y-2">
+            <button id="capture-btn" onclick="capturePhoto()" 
+                class="w-full py-4 bg-white text-gray-900 font-bold rounded-xl shadow-lg">
+                <span class="material-symbols-outlined icon-sm mr-2">photo_camera</span>Capture
+            </button>
+            <div id="preview-actions" class="hidden space-y-2">
+                <button onclick="sendCapturedPhoto()" 
+                    class="w-full py-4 bg-green-600 text-white font-bold rounded-xl shadow-lg">
+                    <span class="material-symbols-outlined icon-sm mr-2">send</span>Send Photo
+                </button>
+                <button onclick="retakePhoto()" 
+                    class="w-full py-4 bg-gray-600 text-white font-bold rounded-xl shadow-lg">
+                    <span class="material-symbols-outlined icon-sm mr-2">refresh</span>Retake
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    /* Chat message styles */
+    .chat-message {
+        max-width: 70%;
+        padding: 0.75rem 1rem;
+        border-radius: 1rem;
+        word-wrap: break-word;
+    }
+    
+    .chat-message-sent {
+        background: linear-gradient(135deg, var(--gradient-from) 0%, var(--gradient-to) 100%);
+        color: white;
+        margin-left: auto;
+        border-bottom-right-radius: 0.25rem;
+    }
+    
+    .chat-message-received {
+        background: #f3f4f6;
+        color: #1f2937;
+        margin-right: auto;
+        border-bottom-left-radius: 0.25rem;
+    }
+    
+    .chat-timestamp {
+        font-size: 0.7rem;
+        opacity: 0.7;
+        margin-top: 0.25rem;
+    }
+    
+    .chat-image {
+        max-width: 200px;
+        border-radius: 0.5rem;
+        cursor: pointer;
+        transition: transform 0.2s;
+    }
+    
+    .chat-image:hover {
+        transform: scale(1.05);
+    }
+    
+    .chat-audio {
+        width: 250px;
+    }
+</style>
+
+<script>
+    console.log('Chat component script loaded, trackerId:', typeof trackerId !== 'undefined' ? trackerId : 'UNDEFINED');
+    
+    let chatUnlocked = false;
+    let mediaRecorder = null;
+    let audioChunks = [];
+    let recordingStartTime = null;
+    let recordingInterval = null;
+    let cameraStream = null;
+    let capturedImageData = null;
+
+    // Socket.IO integration for real-time chat
+    let chatSocket = null;
+    
+    function initChatSocket() {
+        if (typeof io === 'undefined') {
+            console.warn('Socket.IO not loaded, falling back to polling');
+            return;
+        }
+        
+        chatSocket = io();
+        
+        // Join tracker room for real-time updates
+        chatSocket.emit('join_tracker', { tracker_id: trackerId });
+        console.log('Joined tracker room:', trackerId);
+        
+        // Listen for new chat messages
+        chatSocket.on('new_chat_message', function(data) {
+            if (data.tracker_id === trackerId) {
+                console.log('Received new chat message via Socket.IO:', data.message);
+                appendNewMessage(data.message);
+            }
+        });
+        
+        // Listen for tracker updates (status changes, assignments)
+        chatSocket.on('tracker_update', function(data) {
+            if (data.tracker_id === trackerId) {
+                console.log('Tracker updated via Socket.IO:', data);
+                // Reload chat to check if it's now unlocked
+                loadChat();
+            }
+        });
+    }
+    
+    function appendNewMessage(message) {
+        const container = document.getElementById('chat-messages');
+        const currentRole = '{{ session.role }}';
+        const isOwnMessage = message.sender_role === currentRole;
+        
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `flex ${isOwnMessage ? 'justify-end' : 'justify-start'}`;
+        
+        const bubbleClass = isOwnMessage 
+            ? 'bg-gradient-to-r from-teal-600 to-cyan-600 text-white' 
+            : 'bg-gray-100 text-gray-900';
+        
+        let content = '';
+        if (message.type === 'text') {
+            content = `<p class="text-sm break-words">${escapeHtml(message.message)}</p>`;
+        } else if (message.type === 'image') {
+            content = `
+                <img src="${message.file_url}" 
+                     onclick="viewChatImage('${message._id}')"
+                     class="max-w-xs rounded-lg cursor-pointer hover:opacity-90 transition-opacity" 
+                     alt="Shared image">
+                ${message.message ? `<p class="text-sm mt-2">${escapeHtml(message.message)}</p>` : ''}
+            `;
+        } else if (message.type === 'audio') {
+            content = `
+                <audio controls class="max-w-xs">
+                    <source src="${message.file_url}" type="audio/webm">
+                    Your browser does not support audio playback.
+                </audio>
+                ${message.message ? `<p class="text-sm mt-2">${escapeHtml(message.message)}</p>` : ''}
+            `;
+        }
+        
+        const timestamp = new Date(message.timestamp).toLocaleString('en-IN', {
+            hour: '2-digit',
+            minute: '2-digit',
+            day: '2-digit',
+            month: 'short'
+        });
+        
+        messageDiv.innerHTML = `
+            <div class="max-w-[75%]">
+                <div class="${bubbleClass} rounded-2xl px-4 py-2 shadow-sm">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="material-symbols-outlined icon-sm">${isOwnMessage ? 'person' : 'support_agent'}</span>
+                        <span class="text-xs font-semibold opacity-90">${escapeHtml(message.sender_name)}</span>
+                    </div>
+                    ${content}
+                </div>
+                <p class="text-xs ${isOwnMessage ? 'text-right' : 'text-left'} mt-1 px-2 text-gray-500">${timestamp}</p>
+            </div>
+        `;
+        
+        container.appendChild(messageDiv);
+        container.scrollTop = container.scrollHeight;
+        
+        // Add to chatMessages array
+        chatMessages.push(message);
+    }
+
+    async function loadChat() {
+        console.log('loadChat() called, trackerId:', trackerId);
+        try {
+            const response = await fetch(`/api/trackers/${trackerId}/chat/messages`);
+            const data = await response.json();
+            
+            console.log('Chat data received:', data);
+            console.log('Chat unlocked status:', data.chat_unlocked);
+            console.log('Can interact:', data.can_interact);
+            
+            chatUnlocked = data.chat_unlocked;
+            const canInteract = data.can_interact !== false; // Default to true if not specified
+            
+            if (chatUnlocked) {
+                console.log('Chat is unlocked, showing chat interface');
+                document.getElementById('chat-locked').classList.add('hidden');
+                document.getElementById('chat-messages').classList.remove('hidden');
+                
+                // Show or hide input based on can_interact
+                if (canInteract) {
+                    document.getElementById('chat-input-container').classList.remove('hidden');
+                    document.getElementById('chat-status').textContent = 'Chat Active';
+                } else {
+                    document.getElementById('chat-input-container').classList.add('hidden');
+                    document.getElementById('chat-status').textContent = 'View Only - Created by different account';
+                }
+                
+                displayMessages(data.messages);
+                
+                // Mark messages as read only if can interact
+                if (canInteract) {
+                    await fetch(`/api/trackers/${trackerId}/chat/mark-read`, { method: 'POST' });
+                }
+                
+                // Initialize Socket.IO for real-time updates
+                if (!chatSocket) {
+                    initChatSocket();
+                }
+            } else {
+                console.log('Chat is locked, showing locked message');
+                document.getElementById('chat-locked').classList.remove('hidden');
+                document.getElementById('chat-messages').classList.add('hidden');
+                document.getElementById('chat-input-container').classList.add('hidden');
+                document.getElementById('chat-status').textContent = 'Waiting for Ready Status';
+            }
+        } catch (error) {
+            console.error('Error loading chat:', error);
+        }
+    }
+
+    // Store messages globally for image viewing
+    let chatMessages = [];
+
+    function displayMessages(messages) {
+        const container = document.getElementById('chat-messages');
+        const currentRole = '{{ session.role }}';
+        
+        // Store messages for later access
+        chatMessages = messages;
+        
+        console.log('Displaying messages:', messages.length, messages);
+        
+        if (messages.length === 0) {
+            container.innerHTML = `
+                <div class="text-center text-gray-500 text-sm py-8">
+                    <span class="material-symbols-outlined icon-sm text-4xl mb-2 opacity-50">chat</span>
+                    <p>No messages yet. Start the conversation!</p>
+                </div>
+            `;
+            return;
+        }
+        
+        container.innerHTML = messages.map(msg => {
+            const isSent = msg.sender_role === currentRole;
+            const messageClass = isSent ? 'chat-message-sent' : 'chat-message-received';
+            
+            let content = '';
+            if (msg.type === 'image') {
+                console.log('Rendering image message:', {
+                    has_file_url: !!msg.file_url,
+                    file_url_length: msg.file_url ? msg.file_url.length : 0,
+                    file_url_preview: msg.file_url ? msg.file_url.substring(0, 100) : 'null',
+                    is_valid_data_url: msg.file_url ? msg.file_url.startsWith('data:image/') : false
+                });
+                
+                if (msg.file_url && msg.file_url.startsWith('data:image/')) {
+                    content = `<img src="${msg.file_url}" class="chat-image" onclick="viewFullImage('${msg._id}')" 
+                        onerror="console.error('Failed to load image. URL length:', this.src.length); this.src='data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22200%22 height=%22150%22%3E%3Crect fill=%22%23f3f4f6%22 width=%22200%22 height=%22150%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 text-anchor=%22middle%22 fill=%22%23999%22%3EImage Error%3C/text%3E%3C/svg%3E';">`;
+                } else {
+                    content = `<div class="p-3 bg-red-100 text-red-700 rounded text-xs">Image failed to load</div>`;
+                }
+                if (msg.message) content += `<p class="mt-2">${escapeHtml(msg.message)}</p>`;
+            } else if (msg.type === 'audio') {
+                content = `<audio controls class="chat-audio"><source src="${msg.file_url}" type="audio/webm"></audio>`;
+                if (msg.message) content += `<p class="mt-2">${escapeHtml(msg.message)}</p>`;
+            } else {
+                content = `<p>${escapeHtml(msg.message)}</p>`;
+            }
+            
+            return `
+                <div class="flex ${isSent ? 'justify-end' : 'justify-start'}">
+                    <div class="chat-message ${messageClass}">
+                        ${!isSent ? `<p class="text-xs font-semibold mb-1 opacity-75">${escapeHtml(msg.sender_name)}</p>` : ''}
+                        ${content}
+                        <div class="chat-timestamp">${formatChatTime(msg.timestamp)}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+        
+        // Scroll to bottom
+        container.scrollTop = container.scrollHeight;
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('chat-message-input');
+        const message = input.value.trim();
+        
+        if (!message) return;
+        
+        try {
+            const response = await fetch(`/api/trackers/${trackerId}/chat/send`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    type: 'text'
+                })
+            });
+            
+            const data = await response.json();
+            if (data.success) {
+                input.value = '';
+                await loadChat();
+            } else {
+                showToast(data.error || 'Failed to send message', 'error');
+            }
+        } catch (error) {
+            showToast('Failed to send message', 'error');
+        }
+    }
+
+    async function handleImageUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        console.log('Image upload started:', {
+            fileName: file.name,
+            fileSize: file.size,
+            fileType: file.type
+        });
+        
+        if (file.size > 5 * 1024 * 1024) {
+            showToast('Image must be less than 5MB', 'error');
+            return;
+        }
+        
+        showLoading();
+        
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('type', 'image');
+        
+        try {
+            const uploadResponse = await fetch(`/api/trackers/${trackerId}/chat/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const uploadData = await uploadResponse.json();
+            console.log('Upload response:', uploadData);
+            
+            if (uploadData.success) {
+                console.log('File URL received:', uploadData.file_url ? uploadData.file_url.substring(0, 100) : 'NULL');
+                
+                const caption = prompt('Add a caption (optional):') || '';
+                
+                const response = await fetch(`/api/trackers/${trackerId}/chat/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: caption,
+                        type: 'image',
+                        file_url: uploadData.file_url
+                    })
+                });
+                
+                const data = await response.json();
+                console.log('Send message response:', data);
+                
+                if (data.success) {
+                    await loadChat();
+                    showToast('Image sent', 'success');
+                } else {
+                    showToast(data.error || 'Failed to send image', 'error');
+                }
+            } else {
+                showToast(uploadData.error || 'Failed to upload image', 'error');
+            }
+        } catch (error) {
+            console.error('Image upload error:', error);
+            showToast('Failed to upload image', 'error');
+        }
+        
+        hideLoading();
+        event.target.value = '';
+    }
+
+    async function toggleAudioRecording() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            stopAudioRecording();
+        } else {
+            startAudioRecording();
+        }
+    }
+
+    async function startAudioRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorder = new MediaRecorder(stream);
+            audioChunks = [];
+            
+            mediaRecorder.ondataavailable = (event) => {
+                audioChunks.push(event.data);
+            };
+            
+            mediaRecorder.onstop = async () => {
+                const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                await uploadAudio(audioBlob);
+                stream.getTracks().forEach(track => track.stop());
+            };
+            
+            mediaRecorder.start();
+            recordingStartTime = Date.now();
+            
+            document.getElementById('recording-indicator').classList.remove('hidden');
+            document.getElementById('audio-record-btn').classList.add('bg-red-600', 'text-white');
+            
+            recordingInterval = setInterval(() => {
+                const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+                document.getElementById('recording-time').textContent = formatElapsedTime(elapsed);
+            }, 1000);
+            
+        } catch (error) {
+            showToast('Microphone access denied', 'error');
+        }
+    }
+
+    function stopAudioRecording() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            mediaRecorder.stop();
+            clearInterval(recordingInterval);
+            document.getElementById('recording-indicator').classList.add('hidden');
+            document.getElementById('audio-record-btn').classList.remove('bg-red-600', 'text-white');
+        }
+    }
+
+    async function uploadAudio(audioBlob) {
+        showLoading();
+        
+        const formData = new FormData();
+        formData.append('file', audioBlob, 'audio.webm');
+        formData.append('type', 'audio');
+        
+        try {
+            const uploadResponse = await fetch(`/api/trackers/${trackerId}/chat/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const uploadData = await uploadResponse.json();
+            if (uploadData.success) {
+                const response = await fetch(`/api/trackers/${trackerId}/chat/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: '',
+                        type: 'audio',
+                        file_url: uploadData.file_url
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    await loadChat();
+                    showToast('Audio sent', 'success');
+                }
+            }
+        } catch (error) {
+            showToast('Failed to upload audio', 'error');
+        }
+        
+        hideLoading();
+    }
+
+    function refreshChat() {
+        const icon = document.getElementById('chat-refresh-icon');
+        icon.style.animation = 'spin 1s linear infinite';
+        loadChat().then(() => {
+            setTimeout(() => icon.style.animation = '', 500);
+        });
+    }
+    
+    // Add spin animation for Material Icons
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+    `;
+    document.head.appendChild(style);
+
+    function formatChatTime(timestamp) {
+        // Parse the UTC timestamp from server
+        const date = new Date(timestamp);
+        const now = new Date();
+        
+        // Calculate the actual time difference in milliseconds
+        const diffMs = now - date;
+        
+        if (diffMs < 60000) return 'Just now';
+        if (diffMs < 3600000) return `${Math.floor(diffMs / 60000)}m ago`;
+        
+        // For times within today, show time in IST
+        if (diffMs < 86400000) {
+            return date.toLocaleTimeString('en-IN', { 
+                timeZone: 'Asia/Kolkata',
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+        }
+        
+        // For older messages, show date and time in IST
+        return date.toLocaleDateString('en-IN', { 
+            timeZone: 'Asia/Kolkata',
+            month: 'short', 
+            day: 'numeric', 
+            hour: '2-digit', 
+            minute: '2-digit' 
+        });
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Camera Capture Functions
+    async function openCameraCapture() {
+        try {
+            const modal = document.getElementById('camera-capture-modal');
+            const video = document.getElementById('camera-video');
+            const preview = document.getElementById('camera-preview');
+            const captureBtn = document.getElementById('capture-btn');
+            const previewActions = document.getElementById('preview-actions');
+            
+            // Reset state
+            video.classList.remove('hidden');
+            preview.classList.add('hidden');
+            captureBtn.classList.remove('hidden');
+            previewActions.classList.add('hidden');
+            capturedImageData = null;
+            
+            // Request camera access
+            cameraStream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment' } // Use back camera on mobile
+            });
+            
+            video.srcObject = cameraStream;
+            modal.classList.remove('hidden');
+            
+        } catch (error) {
+            console.error('Camera access error:', error);
+            showToast('Camera access denied or not available', 'error');
+        }
+    }
+
+    function capturePhoto() {
+        const video = document.getElementById('camera-video');
+        const canvas = document.getElementById('camera-canvas');
+        const preview = document.getElementById('camera-preview');
+        const captureBtn = document.getElementById('capture-btn');
+        const previewActions = document.getElementById('preview-actions');
+        
+        console.log('Capturing photo from video:', {
+            videoWidth: video.videoWidth,
+            videoHeight: video.videoHeight,
+            readyState: video.readyState
+        });
+        
+        // Set canvas dimensions to match video
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        
+        // Draw video frame to canvas
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Convert to data URL
+        capturedImageData = canvas.toDataURL('image/jpeg', 0.8);
+        
+        console.log('Photo captured:', {
+            dataUrlLength: capturedImageData ? capturedImageData.length : 0,
+            dataUrlPreview: capturedImageData ? capturedImageData.substring(0, 50) : 'null'
+        });
+        
+        // Show preview
+        preview.src = capturedImageData;
+        video.classList.add('hidden');
+        preview.classList.remove('hidden');
+        captureBtn.classList.add('hidden');
+        previewActions.classList.remove('hidden');
+    }
+
+    async function sendCapturedPhoto() {
+        if (!capturedImageData) {
+            console.error('No captured image data');
+            showToast('No image captured', 'error');
+            return;
+        }
+        
+        // Store the image data before closing camera (which might reset it)
+        const imageDataToSend = capturedImageData;
+        
+        console.log('Sending captured photo, data URL length:', imageDataToSend.length);
+        console.log('Data URL preview:', imageDataToSend.substring(0, 100));
+        
+        showLoading();
+        closeCameraCapture();
+        
+        try {
+            // Validate data URL format
+            if (!imageDataToSend.startsWith('data:image/')) {
+                throw new Error('Invalid image data format');
+            }
+            
+            // Convert data URL to blob properly
+            const arr = imageDataToSend.split(',');
+            if (arr.length !== 2) {
+                throw new Error('Invalid data URL structure');
+            }
+            
+            const mimeMatch = arr[0].match(/:(.*?);/);
+            if (!mimeMatch) {
+                throw new Error('Could not extract MIME type');
+            }
+            
+            const mime = mimeMatch[1];
+            const bstr = atob(arr[1]);
+            let n = bstr.length;
+            const u8arr = new Uint8Array(n);
+            while(n--){
+                u8arr[n] = bstr.charCodeAt(n);
+            }
+            const blob = new Blob([u8arr], {type: mime});
+            
+            console.log('Captured image blob:', {
+                size: blob.size,
+                type: blob.type,
+                dataUrlLength: imageDataToSend.length
+            });
+            
+            // Upload the image
+            const formData = new FormData();
+            formData.append('file', blob, 'camera-capture.jpg');
+            formData.append('type', 'image');
+            
+            const uploadResponse = await fetch(`/api/trackers/${trackerId}/chat/upload`, {
+                method: 'POST',
+                body: formData
+            });
+            
+            const uploadData = await uploadResponse.json();
+            console.log('Upload response:', uploadData);
+            
+            if (uploadData.success) {
+                const caption = prompt('Add a caption (optional):') || '';
+                
+                const sendResponse = await fetch(`/api/trackers/${trackerId}/chat/send`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message: caption,
+                        type: 'image',
+                        file_url: uploadData.file_url
+                    })
+                });
+                
+                const sendData = await sendResponse.json();
+                console.log('Send message response:', sendData);
+                
+                if (sendData.success) {
+                    await loadChat();
+                    showToast('Photo sent', 'success');
+                } else {
+                    showToast(sendData.error || 'Failed to send photo', 'error');
+                }
+            } else {
+                showToast(uploadData.error || 'Failed to upload photo', 'error');
+            }
+        } catch (error) {
+            console.error('Error sending photo:', error);
+            showToast('Failed to send photo: ' + error.message, 'error');
+        }
+        
+        hideLoading();
+    }
+
+    function retakePhoto() {
+        const video = document.getElementById('camera-video');
+        const preview = document.getElementById('camera-preview');
+        const captureBtn = document.getElementById('capture-btn');
+        const previewActions = document.getElementById('preview-actions');
+        
+        // Reset to camera view
+        video.classList.remove('hidden');
+        preview.classList.add('hidden');
+        captureBtn.classList.remove('hidden');
+        previewActions.classList.add('hidden');
+        capturedImageData = null;
+    }
+
+    function closeCameraCapture() {
+        const modal = document.getElementById('camera-capture-modal');
+        
+        // Stop camera stream
+        if (cameraStream) {
+            cameraStream.getTracks().forEach(track => track.stop());
+            cameraStream = null;
+        }
+        
+        modal.classList.add('hidden');
+        capturedImageData = null;
+    }
+
+    function viewFullImage(messageId) {
+        // Find the message with this ID
+        const message = chatMessages.find(m => m._id === messageId);
+        if (!message || !message.file_url) {
+            console.error('Message or image not found:', messageId);
+            return;
+        }
+        
+        // Create and show image viewer modal
+        const modal = document.getElementById('image-viewer-modal');
+        const img = document.getElementById('full-image');
+        const caption = document.getElementById('image-caption');
+        
+        img.src = message.file_url;
+        caption.textContent = message.message || 'Image from ' + message.sender_name;
+        
+        modal.classList.remove('hidden');
+    }
+
+    function closeImageViewer() {
+        const modal = document.getElementById('image-viewer-modal');
+        modal.classList.add('hidden');
+    }
+
+    // Load chat on page load
+    loadChat();
+
+    // Auto-refresh chat every 5 seconds
+    setInterval(loadChat, 5000);
+</script>
+
+<!-- Image Viewer Modal -->
+<div id="image-viewer-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4">
+    <div class="relative w-full h-full flex flex-col">
+        <div class="flex justify-between items-center p-3 text-white">
+            <h3 id="image-caption" class="text-sm font-semibold">Image</h3>
+            <button onclick="closeImageViewer()" class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30">
+                <span class="material-symbols-outlined icon-sm">close</span>
+            </button>
+        </div>
+        <div class="flex-1 flex items-center justify-center overflow-auto">
+            <img id="full-image" class="max-w-full max-h-full object-contain" alt="Full size image">
+        </div>
+    </div>
+</div>

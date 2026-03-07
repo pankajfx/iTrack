@@ -1,0 +1,807 @@
+{% extends "base.html" %}
+
+{% block title %}Login - SD-WAN Tracker{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="/static/css/fonts.css">
+<style>
+    /* Animated mesh gradient background */
+    .mesh-bg {
+        background: 
+            radial-gradient(at 0% 0%, rgba(13, 148, 136, 0.3) 0px, transparent 50%),
+            radial-gradient(at 100% 0%, rgba(6, 182, 212, 0.3) 0px, transparent 50%),
+            radial-gradient(at 100% 100%, rgba(20, 184, 166, 0.3) 0px, transparent 50%),
+            radial-gradient(at 0% 100%, rgba(8, 145, 178, 0.3) 0px, transparent 50%),
+            linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+        animation: meshMove 20s ease infinite;
+        background-size: 200% 200%;
+    }
+    
+    @keyframes meshMove {
+        0%, 100% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+    }
+    
+    /* Premium glassmorphism */
+    .glass-card {
+        background: rgba(255, 255, 255, 0.08);
+        backdrop-filter: blur(20px) saturate(180%);
+        -webkit-backdrop-filter: blur(20px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        box-shadow: 
+            0 8px 32px 0 rgba(0, 0, 0, 0.37),
+            inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+    }
+    
+    .glass-input {
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        border: 1px solid rgba(255, 255, 255, 0.3);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    
+    .glass-input:focus {
+        background: rgba(255, 255, 255, 1);
+        border-color: rgba(20, 184, 166, 0.5);
+        box-shadow: 
+            0 0 0 3px rgba(20, 184, 166, 0.1),
+            0 4px 12px rgba(20, 184, 166, 0.15);
+        transform: translateY(-1px);
+    }
+    
+    /* Gradient button with shine effect */
+    .btn-gradient {
+        background: linear-gradient(135deg, #14b8a6 0%, #06b6d4 100%);
+        position: relative;
+        overflow: hidden;
+        transition: all 0.3s ease;
+    }
+    
+    .btn-gradient::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: -100%;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+        transition: left 0.5s;
+    }
+    
+    .btn-gradient:hover::before {
+        left: 100%;
+    }
+    
+    .btn-gradient:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 12px 24px rgba(20, 184, 166, 0.4);
+    }
+    
+    .btn-gradient:active {
+        transform: translateY(0);
+    }
+    
+    /* Role toggle with smooth transition */
+    .role-btn {
+        position: relative;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        background: transparent;
+        color: rgba(255, 255, 255, 0.6);
+    }
+    
+    .role-btn-active {
+        background: linear-gradient(135deg, rgba(20, 184, 166, 0.3) 0%, rgba(6, 182, 212, 0.3) 100%);
+        color: white;
+        box-shadow: 0 4px 12px rgba(20, 184, 166, 0.3);
+    }
+    
+    .role-btn:hover:not(.role-btn-active) {
+        background: rgba(255, 255, 255, 0.05);
+        color: rgba(255, 255, 255, 0.8);
+    }
+    
+    /* Floating particles */
+    .particle {
+        position: absolute;
+        border-radius: 50%;
+        pointer-events: none;
+        opacity: 0.1;
+        animation: float-particle 20s infinite;
+    }
+    
+    @keyframes float-particle {
+        0%, 100% {
+            transform: translate(0, 0) scale(1);
+            opacity: 0.1;
+        }
+        50% {
+            transform: translate(50px, -50px) scale(1.2);
+            opacity: 0.2;
+        }
+    }
+    
+    /* Logo pulse animation */
+    @keyframes pulse-glow {
+        0%, 100% {
+            box-shadow: 0 0 20px rgba(20, 184, 166, 0.4);
+        }
+        50% {
+            box-shadow: 0 0 40px rgba(20, 184, 166, 0.6);
+        }
+    }
+    
+    .logo-glow {
+        animation: pulse-glow 3s ease-in-out infinite;
+    }
+    
+    /* Shake animation for errors */
+    @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        10%, 30%, 50%, 70%, 90% { transform: translateX(-8px); }
+        20%, 40%, 60%, 80% { transform: translateX(8px); }
+    }
+    
+    .shake {
+        animation: shake 0.5s;
+    }
+    
+    /* Custom scrollbar for demo section */
+    .demo-box::-webkit-scrollbar {
+        width: 4px;
+    }
+    
+    .demo-box::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+    }
+    
+    .demo-box::-webkit-scrollbar-thumb {
+        background: rgba(20, 184, 166, 0.5);
+        border-radius: 2px;
+    }
+    
+    /* Clear button hover effect */
+    .clear-btn-hover:hover span {
+        color: #dc2626 !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-start justify-center px-3 pt-16 pb-4 mesh-bg relative overflow-hidden">
+    <!-- Floating particles -->
+    <div class="particle w-64 h-64 bg-teal-500 top-10 left-10" style="animation-delay: 0s;"></div>
+    <div class="particle w-48 h-48 bg-cyan-500 bottom-20 right-20" style="animation-delay: 5s;"></div>
+    <div class="particle w-32 h-32 bg-teal-400 top-1/2 left-1/3" style="animation-delay: 10s;"></div>
+    <div class="particle w-40 h-40 bg-cyan-400 bottom-1/3 left-1/4" style="animation-delay: 15s;"></div>
+    
+    <div class="w-full mx-auto fade-in relative z-10" style="max-width: 360px;">
+        <!-- Logo and Title -->
+        <div class="text-center mb-3 mt-3">
+            <div class="mx-auto h-12 w-12 glass-card rounded-xl flex items-center justify-center logo-glow mb-2">
+                <span class="material-symbols-outlined icon-sm text-lg text-teal-400">lan</span>
+            </div>
+            <h1 class="text-xl font-bold text-white drop-shadow-2xl tracking-wide font-fjalla">
+                SDWAN TRACKER
+            </h1>
+            <p class="mt-0.5 text-xs text-teal-200 font-medium tracking-wider uppercase">
+                Installation Management
+            </p>
+        </div>
+
+        <!-- Login Card -->
+        <div class="glass-card rounded-2xl shadow-2xl p-8 space-y-3">
+            <!-- Role Selection Dropdown -->
+            <div>
+                <label for="role" class="block text-xs font-bold text-white mb-1 ml-0.5 tracking-wide">
+                    <span class="material-symbols-outlined icon-sm mr-1 text-teal-400">badge</span>Role
+                </label>
+                <select id="role" name="role" required
+                    class="glass-input appearance-none relative block w-full px-3 py-1.5 text-gray-900 text-sm rounded-lg focus:outline-none transition-all font-medium">
+                    <option value="">-- Choose Your Role --</option>
+                    <option value="FIELD_ENGINEER">Field Engineer</option>
+                    <option value="FRANCHISE">Franchise</option>
+                    <option value="NELCO_SUPPORT">Field Support (Nelco)</option>
+                    <option value="NOC_SUPPORT">NOC Support (Nelco)</option>
+                </select>
+            </div>
+
+            <form id="login-form" class="space-y-2.5">
+                <!-- Franchise Dropdown (for FIELD_ENGINEER) - Shows FEG + FS combinations -->
+                <div id="franchise-container" class="hidden">
+                    <label for="franchise-search" class="block text-xs font-bold text-white mb-1 ml-0.5 tracking-wide">
+                        <span class="material-symbols-outlined icon-sm mr-1 text-teal-400">store</span>Franchise
+                    </label>
+                    <div class="relative">
+                        <input type="text" id="franchise-search" placeholder="Search and select franchise..." readonly
+                            class="glass-input appearance-none relative block w-full px-3 py-1.5 placeholder-gray-400 text-gray-900 text-sm rounded-lg focus:outline-none transition-all font-medium pr-8 cursor-pointer"
+                            autocomplete="off">
+                        <span class="material-symbols-outlined absolute right-2.5 top-1/2 transform -translate-y-1/2 text-gray-500 pointer-events-none" style="font-size: 18px;">expand_more</span>
+                        <div id="franchise-dropdown" class="hidden absolute z-50 w-full mt-1 bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200" style="max-height: 180px;">
+                            <div class="overflow-y-auto" style="max-height: 180px;">
+                                <!-- Options will be populated here -->
+                            </div>
+                        </div>
+                        <button type="button" id="franchise-clear" class="hidden absolute top-1/2 transform -translate-y-1/2 transition-colors p-1 clear-btn-hover" style="right: -28px;">
+                            <span class="material-symbols-outlined" style="font-size: 20px; font-weight: 600; color: #ef4444;">close</span>
+                        </button>
+                    </div>
+                    <input type="hidden" id="franchise-select" value="">
+                </div>
+
+                <!-- Select Dropdown (universal for all roles after first selection) -->
+                <div id="select-container" class="hidden opacity-0 transition-opacity duration-300">
+                    <label for="select-search" class="block text-xs font-bold text-white mb-1 ml-0.5 tracking-wide">
+                        <span class="material-symbols-outlined icon-sm mr-1 text-teal-400">person</span><span id="select-label">Select</span>
+                    </label>
+                    <div class="relative">
+                        <input type="text" id="select-search" placeholder="Search and select..." readonly
+                            class="glass-input appearance-none relative block w-full px-3 py-1.5 placeholder-gray-400 text-gray-900 text-sm rounded-lg focus:outline-none transition-all font-medium pr-8 cursor-pointer"
+                            autocomplete="off">
+                        <span class="material-symbols-outlined absolute right-2.5 top-1/2 transform -translate-y-1/2 text-gray-500 pointer-events-none" style="font-size: 18px;">expand_more</span>
+                        <div id="select-dropdown-list" class="hidden absolute z-50 w-full mt-1 bg-white rounded-lg shadow-lg overflow-hidden border border-gray-200" style="max-height: 180px;">
+                            <div class="overflow-y-auto" style="max-height: 180px;">
+                                <!-- Options will be populated here -->
+                            </div>
+                        </div>
+                        <button type="button" id="select-clear" class="hidden absolute top-1/2 transform -translate-y-1/2 transition-colors p-1 clear-btn-hover" style="right: -28px;">
+                            <span class="material-symbols-outlined" style="font-size: 20px; font-weight: 600; color: #ef4444;">close</span>
+                        </button>
+                    </div>
+                    <input type="hidden" id="select-dropdown" value="">
+                </div>
+
+                <!-- Password -->
+                <div id="password-container" class="hidden">
+                    <label for="password" class="block text-xs font-bold text-white mb-1 ml-0.5 tracking-wide">
+                        <span class="material-symbols-outlined icon-sm mr-1 text-teal-400">lock</span>Password
+                    </label>
+                    <div class="relative">
+                        <input id="password" name="password" type="password" autocomplete="current-password"
+                            class="glass-input appearance-none relative block w-full px-3 py-1.5 placeholder-gray-400 text-gray-900 text-sm rounded-lg focus:outline-none transition-all pr-9 font-medium"
+                            placeholder="Enter your password">
+                        <button type="button" onclick="togglePassword()" 
+                            class="absolute right-2.5 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-teal-600 transition-colors p-1">
+                            <span id="password-icon" class="material-symbols-outlined icon-sm">visibility</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Submit Button -->
+                <button type="submit" id="submit-btn" disabled
+                    class="btn-gradient w-full flex justify-center items-center py-2 px-4 border-0 text-sm font-bold rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-teal-500 transition-all duration-300 shadow-xl mt-3 tracking-wide opacity-50 cursor-not-allowed">
+                    <span class="material-symbols-outlined mr-2 icon-sm">login</span>
+                    SIGN IN
+                </button>
+            </form>
+
+            <!-- Demo Credentials - Commented out for production -->
+            <!-- 
+            <div class="mt-3 p-3 glass-card rounded-xl border border-teal-400 border-opacity-30 demo-box">
+                <p class="text-xs font-bold text-teal-300 mb-2 flex items-center tracking-wide">
+                    <span class="material-symbols-outlined mr-1.5 icon-sm">key</span>DEMO CREDENTIALS
+                </p>
+                <div class="text-xs text-white space-y-1 ml-5 font-medium">
+                    <p><span class="text-teal-400 font-bold">FE:</span> fe_user / fe123</p>
+                    <p><span class="text-cyan-400 font-bold">NOC:</span> noc_admin / noc123</p>
+                </div>
+            </div>
+            -->
+        </div>
+        
+        <!-- Footer -->
+        <div class="text-center mt-3 space-y-0.5">
+            <p class="text-xs text-white text-opacity-60 font-medium">
+                <span class="material-symbols-outlined mr-1 icon-sm">shield</span>Secure Authentication
+            </p>
+            <p class="text-xs text-teal-400 text-opacity-80 font-bold tracking-wider">
+                VERSION 1.0
+            </p>
+        </div>
+    </div>
+</div>
+
+<script>
+    // State management
+    let currentRole = '';
+    let selectedData = {};
+    let allFranchiseOptions = [];
+    let allSelectOptions = [];
+    
+    // DOM elements
+    const roleSelect = document.getElementById('role');
+    const franchiseContainer = document.getElementById('franchise-container');
+    const selectContainer = document.getElementById('select-container');
+    const passwordContainer = document.getElementById('password-container');
+    const submitBtn = document.getElementById('submit-btn');
+    
+    const franchiseSearch = document.getElementById('franchise-search');
+    const franchiseSelect = document.getElementById('franchise-select');
+    const franchiseDropdown = document.getElementById('franchise-dropdown');
+    const franchiseClear = document.getElementById('franchise-clear');
+    
+    const selectSearch = document.getElementById('select-search');
+    const selectDropdown = document.getElementById('select-dropdown');
+    const selectDropdownList = document.getElementById('select-dropdown-list');
+    const selectLabel = document.getElementById('select-label');
+    const selectClear = document.getElementById('select-clear');
+    const passwordInput = document.getElementById('password');
+    
+    // Custom dropdown functions
+    function showDropdown(dropdownElement) {
+        dropdownElement.classList.remove('hidden');
+    }
+    
+    function hideDropdown(dropdownElement) {
+        dropdownElement.classList.add('hidden');
+    }
+    
+    function populateDropdown(dropdownElement, options, onSelect) {
+        const scrollContainer = dropdownElement.querySelector('div');
+        scrollContainer.innerHTML = '';
+        
+        if (options.length === 0) {
+            const div = document.createElement('div');
+            div.className = 'px-3 py-1 text-gray-500 italic';
+            div.style.fontSize = '0.6rem';
+            div.textContent = 'No results found';
+            scrollContainer.appendChild(div);
+            return;
+        }
+        
+        options.forEach(opt => {
+            const div = document.createElement('div');
+            div.className = 'px-3 py-1 text-gray-900 hover:bg-teal-50 cursor-pointer transition-colors';
+            div.style.fontSize = '0.6rem';
+            div.textContent = opt.text;
+            div.dataset.value = opt.value;
+            div.addEventListener('click', () => onSelect(opt));
+            scrollContainer.appendChild(div);
+        });
+    }
+    
+    function filterAndShowOptions(searchInput, dropdownElement, allOptions, onSelect) {
+        const searchTerm = searchInput.value.toLowerCase();
+        const filtered = allOptions.filter(opt => 
+            opt.text.toLowerCase().includes(searchTerm)
+        );
+        populateDropdown(dropdownElement, filtered, onSelect);
+        showDropdown(dropdownElement);
+    }
+    
+    // Show select container with delay and transition
+    function showSelectContainerWithDelay() {
+        selectContainer.classList.remove('hidden');
+        setTimeout(() => {
+            selectContainer.classList.remove('opacity-0');
+        }, 50);
+    }
+    
+    // Clear button handlers
+    franchiseClear.addEventListener('click', (e) => {
+        e.stopPropagation();
+        franchiseSearch.value = '';
+        franchiseSelect.value = '';
+        franchiseClear.classList.add('hidden');
+        hideDropdown(franchiseDropdown);
+        selectContainer.classList.add('hidden', 'opacity-0');
+        passwordContainer.classList.add('hidden');
+        selectedData = {};
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    });
+    
+    selectClear.addEventListener('click', (e) => {
+        e.stopPropagation();
+        selectSearch.value = '';
+        selectDropdown.value = '';
+        selectClear.classList.add('hidden');
+        hideDropdown(selectDropdownList);
+        passwordContainer.classList.add('hidden');
+        
+        // Clear relevant selected data
+        if (currentRole === 'FIELD_ENGINEER') {
+            delete selectedData.fe_name;
+            delete selectedData.fe_group;
+        } else if (currentRole === 'FRANCHISE') {
+            delete selectedData.feg_name;
+            delete selectedData.actual_role;
+        } else if (currentRole === 'NELCO_SUPPORT') {
+            delete selectedData.fs_name;
+            delete selectedData.fsg_name;
+            delete selectedData.actual_role;
+        } else if (currentRole === 'NOC_SUPPORT') {
+            delete selectedData.noc_username;
+            delete selectedData.actual_role;
+        }
+        
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    });
+    
+    // Franchise dropdown handlers
+    franchiseSearch.addEventListener('focus', () => {
+        if (allFranchiseOptions.length > 0) {
+            filterAndShowOptions(franchiseSearch, franchiseDropdown, allFranchiseOptions, (opt) => {
+                franchiseSearch.value = opt.text;
+                franchiseSelect.value = opt.value;
+                franchiseClear.classList.remove('hidden');
+                hideDropdown(franchiseDropdown);
+                const event = new Event('change');
+                franchiseSelect.dispatchEvent(event);
+            });
+        }
+    });
+    
+    franchiseSearch.addEventListener('input', () => {
+        if (allFranchiseOptions.length > 0) {
+            filterAndShowOptions(franchiseSearch, franchiseDropdown, allFranchiseOptions, (opt) => {
+                franchiseSearch.value = opt.text;
+                franchiseSelect.value = opt.value;
+                franchiseClear.classList.remove('hidden');
+                hideDropdown(franchiseDropdown);
+                const event = new Event('change');
+                franchiseSelect.dispatchEvent(event);
+            });
+        }
+    });
+    
+    // Select dropdown handlers
+    selectSearch.addEventListener('focus', () => {
+        if (allSelectOptions.length > 0) {
+            filterAndShowOptions(selectSearch, selectDropdownList, allSelectOptions, (opt) => {
+                selectSearch.value = opt.text;
+                selectDropdown.value = opt.value;
+                selectClear.classList.remove('hidden');
+                hideDropdown(selectDropdownList);
+                const event = new Event('change');
+                selectDropdown.dispatchEvent(event);
+            });
+        }
+    });
+    
+    selectSearch.addEventListener('input', () => {
+        if (allSelectOptions.length > 0) {
+            filterAndShowOptions(selectSearch, selectDropdownList, allSelectOptions, (opt) => {
+                selectSearch.value = opt.text;
+                selectDropdown.value = opt.value;
+                selectClear.classList.remove('hidden');
+                hideDropdown(selectDropdownList);
+                const event = new Event('change');
+                selectDropdown.dispatchEvent(event);
+            });
+        }
+    });
+    
+    // Close dropdowns when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!franchiseContainer.contains(e.target)) {
+            hideDropdown(franchiseDropdown);
+        }
+        if (!selectContainer.contains(e.target)) {
+            hideDropdown(selectDropdownList);
+        }
+    });
+    
+    // Sort options alphabetically
+    function sortOptions(options) {
+        return options.sort((a, b) => a.text.localeCompare(b.text));
+    }
+    
+    // Hide all containers
+    function hideAllContainers() {
+        franchiseContainer.classList.add('hidden');
+        selectContainer.classList.add('hidden', 'opacity-0');
+        passwordContainer.classList.add('hidden');
+    }
+    
+    // Reset all dropdowns
+    function resetDropdowns() {
+        franchiseSearch.value = '';
+        franchiseSelect.value = '';
+        selectSearch.value = '';
+        selectDropdown.value = '';
+        franchiseClear.classList.add('hidden');
+        selectClear.classList.add('hidden');
+        hideDropdown(franchiseDropdown);
+        hideDropdown(selectDropdownList);
+        passwordInput.value = '';
+        selectedData = {};
+        allFranchiseOptions = [];
+        allSelectOptions = [];
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    }
+    
+    // Enable submit button
+    function enableSubmit() {
+        submitBtn.disabled = false;
+        submitBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+    }
+    
+    // Role selection handler
+    roleSelect.addEventListener('change', async (e) => {
+        currentRole = e.target.value;
+        hideAllContainers();
+        resetDropdowns();
+        
+        if (!currentRole) return;
+        
+        try {
+            if (currentRole === 'FIELD_ENGINEER') {
+                franchiseContainer.classList.remove('hidden');
+                
+                const response = await fetch('/api/login/field-engineer-groups');
+                const groups = await response.json();
+                
+                const uniqueCombinations = {};
+                groups.forEach(group => {
+                    const key = `${group.name}_${group.field_support}`;
+                    if (!uniqueCombinations[key]) {
+                        uniqueCombinations[key] = {
+                            feg_name: group.name,
+                            fs_name: group.field_support
+                        };
+                    }
+                });
+                
+                allFranchiseOptions = Object.values(uniqueCombinations).map(combo => ({
+                    value: JSON.stringify(combo),
+                    text: combo.feg_name
+                }));
+                
+                allFranchiseOptions = sortOptions(allFranchiseOptions);
+                franchiseSearch.removeAttribute('readonly');
+                franchiseSearch.focus();
+                
+            } else if (currentRole === 'FRANCHISE') {
+                showSelectContainerWithDelay();
+                selectLabel.textContent = 'Select Franchise';
+                
+                const response = await fetch('/api/login/field-engineer-groups');
+                const groups = await response.json();
+                
+                const uniqueFEGs = {};
+                groups.forEach(group => {
+                    const key = group.name;
+                    if (!uniqueFEGs[key]) {
+                        uniqueFEGs[key] = group;
+                    }
+                });
+                
+                allSelectOptions = Object.values(uniqueFEGs).map(group => ({
+                    value: JSON.stringify({
+                        feg_name: group.name,
+                        role: 'FIELD_ENGINEER_GROUP'
+                    }),
+                    text: group.name
+                }));
+                
+                allSelectOptions = sortOptions(allSelectOptions);
+                selectSearch.removeAttribute('readonly');
+                selectSearch.focus();
+                
+            } else if (currentRole === 'NELCO_SUPPORT') {
+                showSelectContainerWithDelay();
+                selectLabel.textContent = 'Select Nelco Support';
+                
+                allSelectOptions = [];
+                
+                const fsResponse = await fetch('/api/login/field-supports');
+                const fieldSupports = await fsResponse.json();
+                
+                fieldSupports.forEach(fs => {
+                    allSelectOptions.push({
+                        value: JSON.stringify({
+                            fs_name: fs.name,
+                            role: 'FIELD_SUPPORT'
+                        }),
+                        text: fs.name
+                    });
+                });
+                
+                const fsgResponse = await fetch('/api/login/field-support-groups');
+                const fieldSupportGroups = await fsgResponse.json();
+                
+                fieldSupportGroups.forEach(fsg => {
+                    allSelectOptions.push({
+                        value: JSON.stringify({
+                            fsg_name: fsg.name,
+                            role: 'FIELD_SUPPORT_GROUP'
+                        }),
+                        text: fsg.name
+                    });
+                });
+                
+                allSelectOptions = sortOptions(allSelectOptions);
+                selectSearch.removeAttribute('readonly');
+                selectSearch.focus();
+                
+            } else if (currentRole === 'NOC_SUPPORT') {
+                showSelectContainerWithDelay();
+                selectLabel.textContent = 'Select NOC Support';
+                
+                const response = await fetch('/api/login/noc-supports');
+                const users = await response.json();
+                
+                allSelectOptions = users.map(user => ({
+                    value: JSON.stringify({
+                        noc_username: user.username,
+                        role: user.role
+                    }),
+                    text: user.name || user.username
+                }));
+                
+                allSelectOptions = sortOptions(allSelectOptions);
+                selectSearch.removeAttribute('readonly');
+                selectSearch.focus();
+            }
+        } catch (error) {
+            console.error('Error loading data:', error);
+            showToast('Failed to load options', 'error');
+        }
+    });
+    
+    // Franchise selection handler
+    franchiseSelect.addEventListener('change', async (e) => {
+        const value = e.target.value;
+        if (!value) return;
+        
+        const franchiseData = JSON.parse(value);
+        selectedData.feg_name = franchiseData.feg_name;
+        selectedData.fs_name = franchiseData.fs_name;
+        
+        // Show select container with delay
+        setTimeout(() => {
+            showSelectContainerWithDelay();
+            selectLabel.textContent = 'Select Field Engineer';
+            selectSearch.value = '';
+            selectSearch.setAttribute('readonly', 'readonly');
+            selectClear.classList.add('hidden');
+        }, 300);
+        
+        try {
+            const response = await fetch(`/api/login/field-engineers?field_engineer_group=${encodeURIComponent(franchiseData.feg_name)}&field_support=${encodeURIComponent(franchiseData.fs_name)}`);
+            const engineers = await response.json();
+            
+            allSelectOptions = engineers.map(engineer => ({
+                value: JSON.stringify({
+                    fe_name: engineer.name,
+                    fe_group: franchiseData.feg_name
+                }),
+                text: `${engineer.name}${engineer.location ? ' (' + engineer.location + ')' : ''}`
+            }));
+            
+            allSelectOptions = sortOptions(allSelectOptions);
+            selectSearch.removeAttribute('readonly');
+        } catch (error) {
+            console.error('Error loading field engineers:', error);
+            showToast('Failed to load field engineers', 'error');
+        }
+    });
+    
+    // Select dropdown handler
+    selectDropdown.addEventListener('change', (e) => {
+        const value = e.target.value;
+        if (!value) return;
+        
+        const data = JSON.parse(value);
+        
+        if (currentRole === 'FIELD_ENGINEER') {
+            selectedData.fe_name = data.fe_name;
+            selectedData.fe_group = data.fe_group;
+        } else if (currentRole === 'FRANCHISE') {
+            selectedData.feg_name = data.feg_name;
+            selectedData.actual_role = data.role;
+        } else if (currentRole === 'NELCO_SUPPORT') {
+            if (data.role === 'FIELD_SUPPORT') {
+                selectedData.fs_name = data.fs_name;
+            } else {
+                selectedData.fsg_name = data.fsg_name;
+            }
+            selectedData.actual_role = data.role;
+        } else if (currentRole === 'NOC_SUPPORT') {
+            selectedData.noc_username = data.noc_username;
+            selectedData.actual_role = data.role;
+        }
+        
+        passwordContainer.classList.remove('hidden');
+        passwordInput.focus();
+    });
+    
+    // Password input handler
+    passwordInput.addEventListener('input', (e) => {
+        if (e.target.value.length > 0) {
+            enableSubmit();
+        } else {
+            submitBtn.disabled = true;
+            submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+    });
+    
+    function togglePassword() {
+        const passwordIcon = document.getElementById('password-icon');
+        
+        if (passwordInput.type === 'password') {
+            passwordInput.type = 'text';
+            passwordIcon.textContent = 'visibility_off';
+        } else {
+            passwordInput.type = 'password';
+            passwordIcon.textContent = 'visibility';
+        }
+    }
+
+    // Form submission
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const password = passwordInput.value;
+        
+        if (!password || !currentRole) {
+            showToast('Please complete all fields', 'warning');
+            return;
+        }
+
+        showLoading();
+
+        let payload = {
+            password: password
+        };
+        
+        if (currentRole === 'FIELD_ENGINEER') {
+            payload.role = 'FIELD_ENGINEER';
+            payload.fe_name = selectedData.fe_name;
+            payload.fe_group = selectedData.fe_group;
+        } else if (currentRole === 'FRANCHISE') {
+            payload.role = selectedData.actual_role;
+            payload.feg_name = selectedData.feg_name;
+        } else if (currentRole === 'NELCO_SUPPORT') {
+            payload.role = selectedData.actual_role;
+            if (selectedData.actual_role === 'FIELD_SUPPORT') {
+                payload.fs_name = selectedData.fs_name;
+            } else {
+                payload.fsg_name = selectedData.fsg_name;
+            }
+        } else if (currentRole === 'NOC_SUPPORT') {
+            payload.role = selectedData.actual_role;
+            payload.noc_username = selectedData.noc_username;
+        }
+
+        try {
+            const response = await fetch('/api/auth/login', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await response.json();
+
+            if (data.success) {
+                showToast('Login successful! Redirecting...', 'success');
+                setTimeout(() => {
+                    if (data.role === 'FIELD_ENGINEER' || data.role === 'FIELD_ENGINEER_GROUP' || 
+                        data.role === 'FIELD_SUPPORT' || data.role === 'FIELD_SUPPORT_GROUP') {
+                        window.location.href = '/fe/dashboard';
+                    } else if (data.role === 'NOC' || data.role === 'NOC_SUPPORT_GROUP') {
+                        window.location.href = '/noc/dashboard';
+                    } else {
+                        window.location.href = '/';
+                    }
+                }, 800);
+            } else {
+                hideLoading();
+                showToast(data.message || 'Invalid credentials', 'error');
+                const form = document.getElementById('login-form');
+                form.classList.add('shake');
+                setTimeout(() => form.classList.remove('shake'), 500);
+            }
+        } catch (error) {
+            hideLoading();
+            showToast('Login failed. Please try again.', 'error');
+            console.error('Login error:', error);
+        }
+    });
+</script>
+{% endblock %}

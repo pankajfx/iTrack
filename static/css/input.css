@@ -1,0 +1,25 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom styles */
+@layer base {
+  body {
+    font-family: 'Fjalla One', sans-serif;
+    -webkit-tap-highlight-color: transparent;
+    letter-spacing: 0.02em;
+  }
+  
+  h1, h2, h3, h4, h5, h6, .font-fjalla,
+  .font-bold, .font-semibold,
+  button, .status-badge {
+    font-family: 'Fjalla One', sans-serif !important;
+    letter-spacing: 0.02em;
+  }
+  
+  p:not(.font-bold):not(.font-semibold),
+  .text-xs:not(.font-bold):not(.font-semibold),
+  .text-sm:not(.font-bold):not(.font-semibold) {
+    font-family: 'Inter', sans-serif;
+  }
+}

@@ -1,0 +1,354 @@
+{% extends "base.html" %}
+
+{% block title %}New Installation - SD-WAN Tracker{% endblock %}
+
+{% block extra_css %}
+{% include 'theme_styles.html' %}
+{% endblock %}
+
+{% block content %}
+<!-- Modern Header with Glassmorphism -->
+<header class="bg-gradient-to-r from-teal-600 to-cyan-600 text-white safe-top sticky top-0 z-50 shadow-2xl backdrop-blur-md bg-opacity-95">
+    <div class="px-4 py-4">
+        <div class="flex items-center gap-4">
+            <button onclick="window.history.back()" class="h-12 w-12 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30 transition-all duration-300 active:scale-95 backdrop-blur-sm shadow-lg ring-2 ring-white ring-opacity-30">
+                <span class="material-symbols-outlined text-xl">arrow_back</span>
+            </button>
+            <div>
+                <h1 class="text-xl font-bold font-fjalla tracking-wide drop-shadow-lg">New Installation</h1>
+                <p class="text-sm text-teal-100 font-medium">Fill in site details</p>
+            </div>
+        </div>
+    </div>
+</header>
+
+<!-- Main Content -->
+<main class="pb-24 px-4">
+    <form id="installation-form" class="container mx-auto py-4 space-y-4 max-w-6xl">
+        <!-- Row 1: SDWAN ID, Customer Name, and FE Phone -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- SDWAN ID -->
+            <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-5 hover:shadow-2xl transition-all duration-300">
+                <label class="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-teal-600 text-xl">lan</span>
+                    <span>SDWAN ID *</span>
+                </label>
+                <div class="flex gap-2">
+                    <input type="text" id="sdwan_id" required
+                        class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all duration-300"
+                        placeholder="SDW-12345">
+                    <button type="button" onclick="captureImage('sdwan_id')" 
+                        class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 hover:shadow-md transition-all duration-300 active:scale-95 flex-shrink-0">
+                        <span class="material-symbols-outlined text-xl">photo_camera</span>
+                    </button>
+                </div>
+                <div id="sdwan_id_preview" class="mt-2"></div>
+            </div>
+
+            <!-- Customer Name -->
+            <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-5 hover:shadow-2xl transition-all duration-300">
+                <label class="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-teal-600 text-xl">business</span>
+                    <span>Customer Name *</span>
+                </label>
+                <select id="customer" required
+                    class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 cursor-pointer bg-white transition-all duration-300">
+                    <option value="">Select Customer</option>
+                    <option value="AGS-AXIS">AGS-AXIS</option>
+                    <option value="AGS-MOF-SBI-TOM-2">AGS-MOF-SBI-TOM-2</option>
+                    <option value="AIMIL-Ltd">AIMIL-Ltd</option>
+                    <option value="C-EDGE">C-EDGE</option>
+                    <option value="CANARY-AUTOMATION-LTD">CANARY-AUTOMATION-LTD</option>
+                    <option value="CMS-ICICI">CMS-ICICI</option>
+                    <option value="CMS-SBI-TOM">CMS-SBI-TOM</option>
+                    <option value="ENCARDIO-RITE">ENCARDIO-RITE</option>
+                    <option value="EPS-UBI">EPS-UBI</option>
+                    <option value="FSS-UJJIVAN">FSS-UJJIVAN</option>
+                    <option value="HITACHI-HDFC-Bank">HITACHI-HDFC-Bank</option>
+                    <option value="HITACHI-INDUSIND-Bank">HITACHI-INDUSIND-Bank</option>
+                    <option value="HITACHI-SBI-TOM2-PILOT-SITE-20">HITACHI-SBI-TOM2-PILOT-SITE-20</option>
+                    <option value="Hitachi-Axis">Hitachi-Axis</option>
+                    <option value="Hitachi-ICICI">Hitachi-ICICI</option>
+                    <option value="Hitachi-SBI-TOM">Hitachi-SBI-TOM</option>
+                    <option value="Hitachi-SBI-TOM-2-MOF">Hitachi-SBI-TOM-2-MOF</option>
+                    <option value="Hitachi-WLA">Hitachi-WLA</option>
+                    <option value="ISR">ISR</option>
+                    <option value="NCR-BOB">NCR-BOB</option>
+                    <option value="NCR-SBI-TOM-2">NCR-SBI-TOM-2</option>
+                    <option value="TEMFLO-E-BIZ">TEMFLO-E-BIZ</option>
+                    <option value="TSI-SBI">TSI-SBI</option>
+                    <option value="Writer-ICICI">Writer-ICICI</option>
+                    <option value="nelco">nelco</option>
+                </select>
+            </div>
+
+            <!-- Field Engineer Phone -->
+            <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-5 hover:shadow-2xl transition-all duration-300">
+                <label class="block text-sm font-bold text-gray-700 mb-3 flex items-center gap-2">
+                    <span class="material-symbols-outlined text-teal-600 text-xl">phone</span>
+                    <span>FE Phone Number *</span>
+                </label>
+                <input type="tel" id="fe_phone" required
+                    class="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all duration-300"
+                    placeholder="Your phone number">
+            </div>
+        </div>
+
+        <!-- Row 2: SIM 1, SIM 2, and Router Details -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <!-- SIM 1 Details -->
+            <div class="bg-white rounded-2xl shadow-md p-4 fade-in">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">
+                    <span class="material-symbols-outlined icon-sm text-teal-600 mr-2">sim_card</span>SIM 1 *
+                </h3>
+                <div class="space-y-3">
+                    <div class="flex gap-2">
+                        <select id="sim1_provider" required
+                            class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                            <option value="">Select Provider</option>
+                            <option value="Airtel">Airtel</option>
+                            <option value="Jio">Jio</option>
+                            <option value="VI">VI (Vodafone Idea)</option>
+                            <option value="BSNL">BSNL</option>
+                        </select>
+                        <button type="button" onclick="captureImage('sim1_provider')" 
+                            class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
+                            <span class="material-symbols-outlined icon-sm">photo_camera</span>
+                        </button>
+                    </div>
+                    <div id="sim1_provider_preview" class="mt-2"></div>
+                    
+                    <div class="flex gap-2">
+                        <input type="text" id="sim1_number" required
+                            class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                            placeholder="SIM 1 Number">
+                        <button type="button" onclick="captureImage('sim1_number')" 
+                            class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
+                            <span class="material-symbols-outlined icon-sm">photo_camera</span>
+                        </button>
+                    </div>
+                    <div id="sim1_number_preview" class="mt-2"></div>
+                </div>
+            </div>
+
+            <!-- SIM 2 Details (Optional) -->
+            <div class="bg-white rounded-2xl shadow-md p-4 fade-in">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">
+                    <span class="material-symbols-outlined icon-sm text-teal-600 mr-2">sim_card</span>SIM 2 (Optional)
+                </h3>
+                <div class="space-y-3">
+                    <div class="flex gap-2">
+                        <select id="sim2_provider"
+                            class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                            <option value="">Select Provider</option>
+                            <option value="Airtel">Airtel</option>
+                            <option value="Jio">Jio</option>
+                            <option value="VI">VI (Vodafone Idea)</option>
+                            <option value="BSNL">BSNL</option>
+                        </select>
+                        <button type="button" onclick="captureImage('sim2_provider')" 
+                            class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
+                            <span class="material-symbols-outlined icon-sm">photo_camera</span>
+                        </button>
+                    </div>
+                    <div id="sim2_provider_preview" class="mt-2"></div>
+                    
+                    <div class="flex gap-2">
+                        <input type="text" id="sim2_number"
+                            class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                            placeholder="SIM 2 Number">
+                        <button type="button" onclick="captureImage('sim2_number')" 
+                            class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
+                            <span class="material-symbols-outlined icon-sm">photo_camera</span>
+                        </button>
+                    </div>
+                    <div id="sim2_number_preview" class="mt-2"></div>
+                </div>
+            </div>
+
+            <!-- Router Details -->
+            <div class="bg-white rounded-2xl shadow-md p-4 fade-in">
+                <h3 class="text-sm font-semibold text-gray-700 mb-3">
+                    <span class="material-symbols-outlined icon-sm text-teal-600 mr-2">router</span>Router Details *
+                </h3>
+                <div class="space-y-3">
+                    <select id="router_type" required
+                        class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                        <option value="">Select Router Type</option>
+                        <option value="PI-15">PI-15</option>
+                        <option value="PI-11">PI-11</option>
+                        <option value="PI-24">PI-24</option>
+                    </select>
+
+                    <select id="router_make" required
+                        class="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm">
+                        <option value="">Select Router Make</option>
+                        <option value="Made in India">Made in India</option>
+                        <option value="Made in China">Made in China</option>
+                        <option value="Made in Taiwan">Made in Taiwan</option>
+                    </select>
+
+                    <div class="flex gap-2">
+                        <input type="text" id="router_firmware_version" required
+                            class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                            placeholder="Firmware Version (e.g., v2.3.1)">
+                        <button type="button" onclick="captureImage('router_firmware_version')" 
+                            class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
+                            <span class="material-symbols-outlined icon-sm">photo_camera</span>
+                        </button>
+                    </div>
+                    <div id="router_firmware_version_preview" class="mt-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="fixed bottom-0 left-0 right-0 px-4 py-4 bg-white border-t safe-bottom shadow-2xl z-40">
+            <div class="container mx-auto max-w-6xl">
+                <button type="submit"
+                    class="w-full py-4 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-bold text-lg rounded-2xl shadow-xl hover:shadow-2xl hover:-translate-y-0.5 transition-all duration-300 active:scale-95 flex items-center justify-center gap-2">
+                    <span class="material-symbols-outlined text-2xl">check_circle</span>
+                    <span>Start Installation Tracking</span>
+                </button>
+            </div>
+        </div>
+    </form>
+</main>
+
+<!-- Camera Modal -->
+<div id="camera-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">
+    <div class="w-full h-full flex flex-col">
+        <div class="flex justify-between items-center p-4 text-white">
+            <h3 class="text-lg font-semibold">Capture Image</h3>
+            <button onclick="closeCamera()" class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
+                <span class="material-symbols-outlined icon-sm">close</span>
+            </button>
+        </div>
+        <div class="flex-1 flex items-center justify-center">
+            <video id="camera-video" autoplay playsinline class="max-w-full max-h-full"></video>
+            <canvas id="camera-canvas" class="hidden"></canvas>
+        </div>
+        <div class="p-4">
+            <button onclick="takePicture()" 
+                class="w-full py-4 bg-white text-gray-900 font-bold rounded-xl shadow-lg">
+                <span class="material-symbols-outlined icon-sm mr-2">photo_camera</span>Capture
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+    let currentStream = null;
+    let currentField = null;
+    const capturedImages = {};
+
+    async function captureImage(fieldName) {
+        currentField = fieldName;
+        const modal = document.getElementById('camera-modal');
+        const video = document.getElementById('camera-video');
+
+        modal.classList.remove('hidden');
+
+        try {
+            currentStream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: 'environment' } 
+            });
+            video.srcObject = currentStream;
+        } catch (error) {
+            showToast('Camera access denied', 'error');
+            closeCamera();
+        }
+    }
+
+    function takePicture() {
+        const video = document.getElementById('camera-video');
+        const canvas = document.getElementById('camera-canvas');
+        const context = canvas.getContext('2d');
+
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        context.drawImage(video, 0, 0);
+
+        const imageData = canvas.toDataURL('image/jpeg', 0.8);
+        capturedImages[currentField] = imageData;
+
+        // Show preview
+        const preview = document.getElementById(`${currentField}_preview`);
+        preview.innerHTML = `
+            <div class="relative inline-block">
+                <img src="${imageData}" class="h-20 w-20 object-cover rounded-lg border-2 border-blue-500">
+                <button type="button" onclick="removeImage('${currentField}')" 
+                    class="absolute -top-2 -right-2 h-6 w-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs">
+                    <span class="material-symbols-outlined icon-sm">close</span>
+                </button>
+            </div>
+        `;
+
+        showToast('Image captured successfully', 'success');
+        closeCamera();
+    }
+
+    function removeImage(fieldName) {
+        delete capturedImages[fieldName];
+        document.getElementById(`${fieldName}_preview`).innerHTML = '';
+    }
+
+    function closeCamera() {
+        const modal = document.getElementById('camera-modal');
+        modal.classList.add('hidden');
+
+        if (currentStream) {
+            currentStream.getTracks().forEach(track => track.stop());
+            currentStream = null;
+        }
+    }
+
+    document.getElementById('installation-form').addEventListener('submit', async (e) => {
+        e.preventDefault();
+
+        const formData = {
+            sdwan_id: document.getElementById('sdwan_id').value,
+            customer: document.getElementById('customer').value,
+            fe_phone: document.getElementById('fe_phone').value,
+            sim1_provider: document.getElementById('sim1_provider').value,
+            sim1_number: document.getElementById('sim1_number').value,
+            sim2_provider: document.getElementById('sim2_provider').value,
+            sim2_number: document.getElementById('sim2_number').value,
+            router_type: document.getElementById('router_type').value,
+            router_make: document.getElementById('router_make').value,
+            router_firmware_version: document.getElementById('router_firmware_version').value,
+            images: capturedImages
+        };
+
+        showLoading();
+
+        try {
+            const response = await fetch('/api/trackers', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(formData)
+            });
+
+            const data = await response.json();
+
+            if (response.status === 409) {
+                hideLoading();
+                if (confirm('This SDWAN ID already exists. Would you like to view it?')) {
+                    window.location.href = `/fe/tracker/${data.tracker_id}`;
+                }
+            } else if (data.success) {
+                showToast('Installation tracker created!', 'success');
+                setTimeout(() => {
+                    window.location.href = `/fe/tracker/${data.tracker._id}`;
+                }, 1000);
+            } else {
+                hideLoading();
+                showToast('Failed to create tracker', 'error');
+            }
+        } catch (error) {
+            hideLoading();
+            showToast('An error occurred', 'error');
+        }
+    });
+</script>
+{% endblock %}

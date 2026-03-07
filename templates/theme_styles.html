@@ -1,0 +1,113 @@
+<!-- Dynamic Theme Styles -->
+<style>
+    :root {
+        /* Theme Colors */
+        --gradient-from: {{ theme.gradient_from }};
+        --gradient-to: {{ theme.gradient_to }};
+        --accent: {{ theme.accent }};
+        --hover: {{ theme.hover }};
+        --focus-ring: {{ theme.focus_ring }};
+        --badge-bg: {{ theme.badge_bg }};
+        --badge-text: {{ theme.badge_text }};
+        --button-bg: {{ theme.button_bg }};
+        --button-hover: {{ theme.button_hover }};
+    }
+    
+    /* Apply theme to gradients */
+    .bg-gradient-to-r {
+        background: linear-gradient(to right, var(--gradient-from), var(--gradient-to)) !important;
+    }
+    
+    /* Apply theme to buttons */
+    .btn-primary,
+    .fab {
+        background: linear-gradient(135deg, var(--gradient-from) 0%, var(--gradient-to) 100%) !important;
+    }
+    
+    .btn-primary:hover,
+    .fab:hover {
+        background: linear-gradient(135deg, var(--hover) 0%, var(--gradient-to) 100%) !important;
+    }
+    
+    /* Apply theme to links and accents */
+    .text-accent,
+    a.text-accent {
+        color: var(--accent) !important;
+    }
+    
+    .text-accent:hover {
+        color: var(--hover) !important;
+    }
+    
+    /* Apply theme to focus rings */
+    .focus\:ring-accent:focus {
+        --tw-ring-color: var(--focus-ring) !important;
+    }
+    
+    /* Apply theme to badges */
+    .badge-accent {
+        background-color: var(--badge-bg) !important;
+        color: var(--badge-text) !important;
+    }
+    
+    /* Apply theme to progress bars */
+    .progress-bar {
+        background: linear-gradient(to right, var(--gradient-from), var(--gradient-to)) !important;
+    }
+    
+    /* Apply theme to status badges with accent color */
+    .status-badge.bg-teal-100 {
+        background-color: var(--badge-bg) !important;
+    }
+    
+    .status-badge.text-teal-800,
+    .status-badge.text-teal-600 {
+        color: var(--badge-text) !important;
+    }
+    
+    /* Apply theme to icon colors */
+    .text-teal-600,
+    .text-cyan-600 {
+        color: var(--accent) !important;
+    }
+    
+    /* Apply theme to hover states */
+    .hover\:text-teal-700:hover,
+    .hover\:text-cyan-700:hover {
+        color: var(--hover) !important;
+    }
+    
+    /* Apply theme to background colors */
+    .bg-teal-100,
+    .bg-cyan-100 {
+        background-color: var(--badge-bg) !important;
+    }
+    
+    .bg-teal-600,
+    .bg-cyan-600 {
+        background-color: var(--accent) !important;
+    }
+    
+    .bg-teal-600:hover,
+    .bg-cyan-600:hover {
+        background-color: var(--hover) !important;
+    }
+    
+    /* Apply theme to borders */
+    .border-teal-600,
+    .border-cyan-600 {
+        border-color: var(--accent) !important;
+    }
+    
+    /* Apply theme to ring colors */
+    .ring-teal-500,
+    .ring-cyan-500 {
+        --tw-ring-color: var(--focus-ring) !important;
+    }
+    
+    /* Apply theme to text colors in headers */
+    .text-teal-100,
+    .text-cyan-100 {
+        color: rgba(255, 255, 255, 0.9) !important;
+    }
+</style>

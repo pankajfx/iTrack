@@ -1,0 +1,1519 @@
+{% extends "base.html" %}
+
+{% block title %}Tracker Details - NOC Dashboard{% endblock %}
+
+{% block extra_css %}
+{% include 'theme_styles.html' %}
+<!-- Cache buster: v2.1.0 - Field Engineer horizontal layout -->
+<style>
+    .stage-card { transition: all 0.2s ease; }
+    .stage-card.locked { opacity: 0.5; pointer-events: none; }
+    .action-btn { transition: all 0.15s ease; }
+    .action-btn:active { transform: scale(0.97); }
+    .pulse-badge { animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+</style>
+{% endblock %}
+
+{% block content %}
+<script src="{{ url_for('static', filename='js/realtime_handler.js') }}"></script>
+<script>
+    const trackerId = '{{ tracker_id }}';
+    window.currentTrackerId = trackerId;  // Make available to realtime_handler.js
+    const currentUserId = '{{ session.user_id }}';
+    const currentUserRole = '{{ session.role }}';
+    const isNSG = currentUserRole === 'NOC_SUPPORT_GROUP';
+</script>
+
+<!-- Header -->
+<header class="bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-lg">
+    <div class="container mx-auto px-3 py-1.5">
+        <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <button onclick="window.location.href='/noc/dashboard'"
+                    class="h-7 w-7 bg-white bg-opacity-20 rounded-lg flex items-center justify-center hover:bg-opacity-30 transition-all">
+                    <span class="material-symbols-outlined icon-sm">arrow_back</span>
+                </button>
+                <div>
+                    <h1 class="text-sm sm:text-base font-bold" id="header-sdwan-id">Loading…</h1>
+                    <p class="text-xs text-teal-100 hidden sm:block" id="header-customer">Please wait…</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-1.5">
+                <div class="text-right hidden sm:block bg-black bg-opacity-20 px-2 py-1 rounded-md border border-white border-opacity-20">
+                    <p class="text-white" style="font-size: 0.68rem; font-weight: 500;">Welcome, <span class="text-yellow-200 font-semibold">{{ session.username|display_name }}</span></p>
+                </div>
+                <button onclick="refreshTracker()"
+                    class="px-2 py-1 bg-white bg-opacity-15 rounded-md hover:bg-opacity-25 transition-all flex items-center gap-1" style="font-size: 0.65rem; font-weight: 500;">
+                    <span class="material-symbols-outlined" style="font-size: 14px;" id="refresh-icon">sync</span>Refresh
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<!-- Main -->
+<main class="container mx-auto px-3 sm:px-4 py-3 sm:py-4">
+    <div id="loading-state" class="text-center py-12">
+        <div class="spinner mx-auto"></div>
+        <p class="text-gray-500 mt-4">Loading tracker details…</p>
+    </div>
+
+    <div id="content-container" class="hidden">
+
+        <!-- ── Row 1: Status + Info + FE ──────────────────────────────────── -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+            <!-- Installation Status -->
+            <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div class="p-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined icon-md">trending_up</span>
+                        <h2 class="text-sm font-bold">Installation Status</h2>
+                    </div>
+                </div>
+                <div class="p-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <span id="status-badge" class="status-badge bg-yellow-100 text-yellow-800 text-xs">
+                            <span class="material-symbols-outlined icon-sm">schedule</span>
+                            <span>Loading</span>
+                        </span>
+                        <!-- Assign button for unassigned trackers -->
+                        <button id="assign-btn" onclick="assignTracker()" class="hidden px-2 py-1 text-xs bg-teal-600 text-white rounded-lg hover:bg-teal-700 font-semibold">
+                            <span class="material-symbols-outlined icon-sm mr-1">assignment_ind</span>Assign to Me
+                        </button>
+                    </div>
+                    <div class="mb-2">
+                        <div class="flex justify-between text-xs text-gray-600 mb-1">
+                            <span>Progress</span>
+                            <span class="font-semibold" id="progress-percentage">0%</span>
+                        </div>
+                        <div class="w-full bg-gray-200 rounded-full h-2">
+                            <div id="progress-bar" class="progress-bar h-2 rounded-full transition-all duration-500" style="width:0%"></div>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div class="bg-gray-50 rounded-lg p-2">
+                            <p class="text-gray-600 mb-0.5">Created</p>
+                            <p class="font-semibold text-gray-900" id="created-time">-</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg p-2">
+                            <p class="text-gray-600 mb-0.5">Elapsed</p>
+                            <p class="font-semibold text-gray-900" id="elapsed-time">-</p>
+                        </div>
+                        <div class="bg-gray-50 rounded-lg p-2">
+                            <p class="text-gray-600 mb-0.5">Queue wait</p>
+                            <p class="font-semibold text-gray-900" id="queue-wait-time">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Installation Info -->
+            <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div class="p-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined icon-md">info</span>
+                        <h3 class="text-sm font-bold">Installation Info</h3>
+                    </div>
+                </div>
+                <div class="p-3">
+                    <!-- Horizontal layout for Tracker ID, SDWAN ID, Customer -->
+                    <div class="grid grid-cols-3 gap-3 text-xs mb-3">
+                        <div>
+                            <p class="text-gray-500 mb-0.5">Tracker ID</p>
+                            <p class="font-semibold text-gray-900 break-words" id="tracker-id">-</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 mb-0.5">SDWAN ID</p>
+                            <p class="font-semibold text-gray-900 break-words" id="detail-sdwan-id">-</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 mb-0.5">Customer</p>
+                            <p class="font-semibold text-gray-900 break-words" id="detail-customer">-</p>
+                        </div>
+                    </div>
+                    <!-- HSO Status and other info below -->
+                    <div class="space-y-1.5 text-xs">
+                        <div>
+                            <p class="text-gray-500 mb-0.5">HSO Status</p>
+                            <span id="hso-status-badge" class="status-badge bg-yellow-100 text-yellow-800 text-xs">
+                                <span class="material-symbols-outlined icon-sm">schedule</span><span>Pending</span>
+                            </span>
+                        </div>
+                        <div id="hso-rejection-box" class="hidden p-2 bg-red-50 rounded-lg">
+                            <p class="text-red-700 font-semibold text-xs mb-0.5">HSO Rejection Reason:</p>
+                            <p class="text-red-600 text-xs" id="hso-rejection-text">-</p>
+                        </div>
+                        <div id="hso-attempts-box" class="hidden text-xs text-gray-500">
+                            <span class="material-symbols-outlined icon-sm mr-1">history</span>
+                            <span id="hso-attempts-count">0</span> submission attempt(s)
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Field Engineer -->
+            <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div class="p-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined icon-md">badge</span>
+                        <h3 class="text-sm font-bold">Field Engineer</h3>
+                    </div>
+                </div>
+                <div class="p-3">
+                    <!-- Horizontal layout for Name, Phone, Email, Group -->
+                    <div class="grid grid-cols-3 gap-3 text-xs">
+                        <div>
+                            <p class="text-gray-500 mb-0.5">Name</p>
+                            <p class="font-semibold text-gray-900 break-words" id="fe-name">-</p>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 mb-0.5">Phone</p>
+                            <a href="#" id="fe-phone" class="font-semibold text-teal-600 hover:text-teal-700 break-words">-</a>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 mb-0.5">Email</p>
+                            <a href="#" id="fe-email" class="font-semibold text-teal-600 hover:text-teal-700 break-all">-</a>
+                        </div>
+                        <div>
+                            <p class="text-gray-500 mb-0.5">Group</p>
+                            <p class="font-semibold text-gray-900 break-words" id="fe-group">-</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Row 2: SIM + ZTP + Quick Actions ───────────────────────────── -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
+
+            <!-- SIM Management -->
+            <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div class="p-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined icon-md">sim_card</span>
+                        <h2 class="text-sm font-bold">SIM Management</h2>
+                    </div>
+                </div>
+                <div class="p-2" id="sim-management-panel">
+                    <!-- SIM1 -->
+                    <div class="bg-gray-50 rounded-lg p-2 mb-2" id="sim1-card">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <h3 class="text-xs font-bold text-gray-900">SIM 1</h3>
+                            <span id="sim1-status-badge" class="status-badge bg-gray-100 text-gray-800 text-xs">
+                                <span class="material-symbols-outlined icon-sm">schedule</span><span>Pending</span>
+                            </span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5 mb-1.5 text-xs">
+                            <div>
+                                <div class="flex items-center justify-between mb-0.5">
+                                    <p class="text-gray-600">Provider</p>
+                                    <button onclick="viewSimImages('sim1','provider')" id="sim1-provider-img-btn" class="hidden h-5 w-5 bg-teal-100 text-teal-600 rounded hover:bg-teal-200 flex items-center justify-center">
+                                        <span class="material-symbols-outlined" style="font-size:14px">image</span>
+                                    </button>
+                                </div>
+                                <p class="font-semibold text-gray-900" id="sim1-provider">-</p>
+                            </div>
+                            <div>
+                                <div class="flex items-center justify-between mb-0.5">
+                                    <p class="text-gray-600">Number</p>
+                                    <button onclick="viewSimImages('sim1','number')" id="sim1-number-img-btn" class="hidden h-5 w-5 bg-teal-100 text-teal-600 rounded hover:bg-teal-200 flex items-center justify-center">
+                                        <span class="material-symbols-outlined" style="font-size:14px">image</span>
+                                    </button>
+                                </div>
+                                <p class="font-semibold text-gray-900" id="sim1-number">-</p>
+                            </div>
+                        </div>
+                        <div id="sim1-timer" class="hidden mb-2 p-2 bg-blue-50 rounded-lg">
+                            <div class="flex items-center justify-between text-xs">
+                                <span class="text-blue-700 font-semibold"><span class="material-symbols-outlined icon-sm mr-1">schedule</span>Activating…</span>
+                                <span class="text-blue-900 font-bold" id="sim1-elapsed">00:00</span>
+                            </div>
+                        </div>
+                        <div id="sim1-failure" class="hidden mb-2 p-2 bg-red-50 rounded-lg">
+                            <p class="text-xs text-red-700 font-semibold mb-0.5">Last failure reason:</p>
+                            <p class="text-xs text-red-600" id="sim1-failure-reason">-</p>
+                        </div>
+                        <div id="sim1-attempts-info" class="hidden mb-1 text-xs text-gray-500">
+                            <span class="material-symbols-outlined icon-sm mr-1">history</span>
+                            <span id="sim1-attempt-count">0</span> attempt(s)
+                        </div>
+                        <div id="sim1-actions" class="space-y-1.5">
+                            <div class="flex gap-1.5">
+                                <button onclick="startSimActivation('sim1')" id="sim1-start-btn"
+                                    class="action-btn flex-1 px-2 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">play_arrow</span>Start
+                                </button>
+                                <button onclick="markSimComplete('sim1','activation_complete_preactivated')" id="sim1-preactivated-btn"
+                                    class="action-btn flex-1 px-2 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">done_all</span>Pre-activated
+                                </button>
+                            </div>
+                            <div class="flex gap-1.5">
+                                <button onclick="markSimComplete('sim1','activation_complete_manual')" id="sim1-complete-btn"
+                                    class="action-btn hidden flex-1 px-2 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">check</span>Activated
+                                </button>
+                                <button onclick="markSimFailed('sim1')" id="sim1-failed-btn"
+                                    class="action-btn hidden flex-1 px-2 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">close</span>Failed
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- SIM2 -->
+                    <div class="bg-gray-50 rounded-lg p-2" id="sim2-card">
+                        <div class="flex items-center justify-between mb-1.5">
+                            <h3 class="text-xs font-bold text-gray-900">SIM 2</h3>
+                            <span id="sim2-status-badge" class="status-badge bg-gray-100 text-gray-800 text-xs">
+                                <span class="material-symbols-outlined icon-sm">schedule</span><span>Pending</span>
+                            </span>
+                        </div>
+                        <div class="grid grid-cols-2 gap-1.5 mb-1.5 text-xs">
+                            <div>
+                                <div class="flex items-center justify-between mb-0.5">
+                                    <p class="text-gray-600">Provider</p>
+                                    <button onclick="viewSimImages('sim2','provider')" id="sim2-provider-img-btn" class="hidden h-5 w-5 bg-teal-100 text-teal-600 rounded hover:bg-teal-200 flex items-center justify-center">
+                                        <span class="material-symbols-outlined" style="font-size:14px">image</span>
+                                    </button>
+                                </div>
+                                <p class="font-semibold text-gray-900" id="sim2-provider">-</p>
+                            </div>
+                            <div>
+                                <div class="flex items-center justify-between mb-0.5">
+                                    <p class="text-gray-600">Number</p>
+                                    <button onclick="viewSimImages('sim2','number')" id="sim2-number-img-btn" class="hidden h-5 w-5 bg-teal-100 text-teal-600 rounded hover:bg-teal-200 flex items-center justify-center">
+                                        <span class="material-symbols-outlined" style="font-size:14px">image</span>
+                                    </button>
+                                </div>
+                                <p class="font-semibold text-gray-900" id="sim2-number">-</p>
+                            </div>
+                        </div>
+                        <div id="sim2-timer" class="hidden mb-2 p-2 bg-blue-50 rounded-lg">
+                            <div class="flex items-center justify-between text-xs">
+                                <span class="text-blue-700 font-semibold"><span class="material-symbols-outlined icon-sm mr-1">schedule</span>Activating…</span>
+                                <span class="text-blue-900 font-bold" id="sim2-elapsed">00:00</span>
+                            </div>
+                        </div>
+                        <div id="sim2-failure" class="hidden mb-2 p-2 bg-red-50 rounded-lg">
+                            <p class="text-xs text-red-700 font-semibold mb-0.5">Last failure reason:</p>
+                            <p class="text-xs text-red-600" id="sim2-failure-reason">-</p>
+                        </div>
+                        <div id="sim2-attempts-info" class="hidden mb-1 text-xs text-gray-500">
+                            <span class="material-symbols-outlined icon-sm mr-1">history</span>
+                            <span id="sim2-attempt-count">0</span> attempt(s)
+                        </div>
+                        <div id="sim2-actions" class="space-y-1.5">
+                            <div class="flex gap-1.5">
+                                <button onclick="startSimActivation('sim2')" id="sim2-start-btn"
+                                    class="action-btn flex-1 px-2 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">play_arrow</span>Start
+                                </button>
+                                <button onclick="markSimComplete('sim2','activation_complete_preactivated')" id="sim2-preactivated-btn"
+                                    class="action-btn flex-1 px-2 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">done_all</span>Pre-activated
+                                </button>
+                            </div>
+                            <div class="flex gap-1.5">
+                                <button onclick="markSimComplete('sim2','activation_complete_manual')" id="sim2-complete-btn"
+                                    class="action-btn hidden flex-1 px-2 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">check</span>Activated
+                                </button>
+                                <button onclick="markSimFailed('sim2')" id="sim2-failed-btn"
+                                    class="action-btn hidden flex-1 px-2 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">close</span>Failed
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ZTP Management -->
+            <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div class="p-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined icon-md">memory</span>
+                        <h2 class="text-sm font-bold">ZTP Management</h2>
+                    </div>
+                </div>
+                <div class="p-2">
+                    <div class="bg-gray-50 rounded-lg p-2">
+                        <!-- Router Info: Make, Model, Firmware -->
+                        <div class="grid grid-cols-3 gap-2 mb-2 text-xs">
+                            <div>
+                                <p class="text-gray-500 mb-0.5">Make</p>
+                                <p class="font-semibold text-gray-900 break-words" id="router-make">-</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-500 mb-0.5">Model</p>
+                                <p class="font-semibold text-gray-900 break-words" id="router-model">-</p>
+                            </div>
+                            <div>
+                                <p class="text-gray-500 mb-0.5">Firmware</p>
+                                <p class="font-semibold text-gray-900 break-words" id="firmware-version">-</p>
+                            </div>
+                        </div>
+                        
+                        <div class="flex justify-end mb-2">
+                            <button onclick="viewFirmwareImages()" id="firmware-img-btn" class="hidden px-2 py-1 text-xs bg-teal-100 text-teal-600 rounded-lg hover:bg-teal-200 transition-all font-semibold">
+                                <span class="material-symbols-outlined icon-sm mr-1">image</span>View Firmware Images
+                            </button>
+                        </div>
+
+                        <!-- Stage 1: ZTP Config Verification -->
+                        <div class="mb-2 border-t border-gray-200 pt-2">
+                            <div class="flex items-center justify-between mb-1.5">
+                                <p class="text-xs font-bold text-gray-700">Step 1 — Config Verification</p>
+                                <span id="ztp-config-badge" class="status-badge bg-gray-100 text-gray-800 text-xs">
+                                    <span class="material-symbols-outlined icon-sm">schedule</span><span>Pending</span>
+                                </span>
+                            </div>
+                            <div id="ztp-config-failure" class="hidden mb-1.5 p-1.5 bg-red-50 rounded text-xs text-red-600" id="ztp-config-failure-text">-</div>
+                            <div id="ztp-config-actions" class="flex gap-1.5">
+                                <button onclick="verifyZtpConfig('verified')" id="ztp-config-ok-btn"
+                                    class="action-btn flex-1 px-2 py-1.5 bg-green-100 text-green-700 rounded-lg hover:bg-green-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">verified</span>Config OK
+                                </button>
+                                <button onclick="verifyZtpConfig('failed')" id="ztp-config-fail-btn"
+                                    class="action-btn flex-1 px-2 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">error</span>Config Issue
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Stage 2: ZTP Execution (only visible after config verified) -->
+                        <div class="border-t border-gray-200 pt-2" id="ztp-execution-section">
+                            <div class="flex items-center justify-between mb-1.5">
+                                <p class="text-xs font-bold text-gray-700">Step 2 — ZTP Execution</p>
+                                <span id="ztp-status-badge" class="status-badge bg-gray-100 text-gray-800 text-xs">
+                                    <span class="material-symbols-outlined icon-sm">schedule</span><span>Pending</span>
+                                </span>
+                            </div>
+                            <!-- Who performed ZTP indicator -->
+                            <div id="ztp-performer-info" class="hidden mb-1.5 p-1.5 bg-indigo-50 rounded text-xs text-indigo-700 font-semibold"></div>
+                            <!-- Timer -->
+                            <div id="ztp-timer" class="hidden mb-1.5 p-2 bg-blue-50 rounded-lg">
+                                <div class="flex items-center justify-between text-xs">
+                                    <span class="text-blue-700 font-semibold"><span class="material-symbols-outlined icon-sm mr-1">schedule</span>ZTP running…</span>
+                                    <span class="text-blue-900 font-bold" id="ztp-elapsed">00:00</span>
+                                </div>
+                            </div>
+                            <!-- Failure -->
+                            <div id="ztp-failure" class="hidden mb-1.5 p-2 bg-red-50 rounded-lg">
+                                <p class="text-xs text-red-700 font-semibold mb-0.5">ZTP failure reason:</p>
+                                <p class="text-xs text-red-600" id="ztp-failure-reason">-</p>
+                            </div>
+                            <!-- FE completed, waiting NS verification -->
+                            <div id="ztp-fe-pending-verify" class="hidden mb-1.5 p-2 bg-amber-50 rounded-lg text-xs text-amber-700 font-semibold">
+                                <span class="material-symbols-outlined icon-sm mr-1">pending</span>FE reported ZTP complete — verify below
+                            </div>
+                            <!-- NS ZTP actions: only shown if FE requested NS to do ZTP -->
+                            <div id="ztp-ns-actions" class="flex gap-1.5">
+                                <button onclick="updateZtpStatus('initiated')" id="ztp-ns-start-btn"
+                                    class="action-btn hidden flex-1 px-2 py-1.5 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">play_arrow</span>Start ZTP (NS)
+                                </button>
+                                <button onclick="updateZtpStatus('completed')" id="ztp-ns-complete-btn"
+                                    class="action-btn hidden flex-1 px-2 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">check</span>ZTP Done
+                                </button>
+                                <button onclick="updateZtpStatus('failed')" id="ztp-ns-failed-btn"
+                                    class="action-btn hidden flex-1 px-2 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">close</span>Failed
+                                </button>
+                            </div>
+                            <!-- Verify FE completion button (shown when FE reported ZTP done) -->
+                            <div id="ztp-verify-fe-actions" class="hidden flex gap-1.5">
+                                <button onclick="updateZtpStatus('verified_fe_completion')" id="ztp-verify-btn"
+                                    class="action-btn flex-1 px-2 py-1.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">task_alt</span>Verify & Accept ZTP
+                                </button>
+                                <button onclick="updateZtpStatus('failed')" id="ztp-reject-btn"
+                                    class="action-btn flex-1 px-2 py-1.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-semibold text-xs">
+                                    <span class="material-symbols-outlined icon-sm mr-1">close</span>Reject
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Actions (HSO + Ready) -->
+            <div class="bg-white rounded-2xl shadow-md overflow-hidden">
+                <div class="p-3 bg-gradient-to-r from-teal-600 to-cyan-600 text-white">
+                    <div class="flex items-center gap-2">
+                        <span class="material-symbols-outlined icon-md">bolt</span>
+                        <h3 class="text-sm font-bold">Quick Actions</h3>
+                    </div>
+                </div>
+                <div class="p-2 space-y-1.5">
+                    <!-- Pending Transfer Request Status -->
+                    <div id="pending-request-status" class="hidden p-2 bg-amber-50 border-l-4 border-amber-400 rounded text-xs">
+                        <div class="flex items-start gap-2">
+                            <span class="material-symbols-outlined icon-sm text-amber-600">pending</span>
+                            <div class="flex-1">
+                                <p class="font-semibold text-amber-800 mb-1">Transfer Request Pending</p>
+                                <p class="text-gray-700">Requested to: <span id="pending-target-noc" class="font-semibold"></span></p>
+                                <p class="text-gray-600 mt-1">Reason: <span id="pending-reason"></span></p>
+                                <p class="text-gray-500 text-xs mt-1">Requested <span id="pending-time"></span></p>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Revoke Transfer Request Button -->
+                    <button id="revoke-request-btn" onclick="revokeTransferRequest()" class="hidden w-full px-2 py-1.5 text-xs bg-red-100 text-red-700 font-semibold rounded-lg hover:bg-red-200 transition-all">
+                        <span class="material-symbols-outlined icon-sm mr-1">cancel</span>Revoke Transfer Request
+                    </button>
+                    
+                    <!-- Request Transfer to Another NOC -->
+                    <button id="request-transfer-btn" onclick="showRequestTransferModal()"
+                        class="w-full px-2 py-1.5 text-xs bg-orange-100 text-orange-700 font-semibold rounded-lg hover:bg-orange-200 transition-all">
+                        <span class="material-symbols-outlined icon-sm mr-1">swap_horiz</span>Request Transfer to Another NOC
+                    </button>
+                    
+                    <!-- Tracker Locked Message -->
+                    <div id="tracker-locked-msg" class="hidden p-2 bg-gray-50 border-l-4 border-gray-400 rounded text-xs text-gray-700">
+                        <span class="material-symbols-outlined icon-sm mr-1">lock</span>All actions disabled while transfer request is pending. Revoke request to regain access.
+                    </div>
+                    
+                    <!-- Mark Ready for Coordination -->
+                    <button id="ready-btn" onclick="markReadyForCoordination()"
+                        class="w-full px-2 py-1.5 text-xs bg-gray-300 text-gray-500 font-semibold rounded-lg cursor-not-allowed" disabled>
+                        <span class="material-symbols-outlined icon-sm mr-1">lock</span>Complete SIM &amp; ZTP First
+                    </button>
+
+                    <!-- HSO Actions — visible only after ready_for_coordination or hso_submitted -->
+                    <div id="hso-action-section" class="hidden space-y-1.5">
+                        <p class="text-xs text-gray-500 font-semibold pt-1 border-t border-gray-100">HSO Review</p>
+
+                        <!-- Approve HSO -->
+                        <button id="approve-hso-btn" onclick="approveHSO()"
+                            class="hidden w-full px-2 py-1.5 text-xs bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-semibold rounded-lg hover:shadow-lg transition-all">
+                            <span class="material-symbols-outlined icon-sm mr-1">thumb_up</span>Approve HSO
+                        </button>
+
+                        <!-- Reject HSO -->
+                        <button id="reject-hso-btn" onclick="rejectHSO()"
+                            class="hidden w-full px-2 py-1.5 text-xs bg-red-100 text-red-700 font-semibold rounded-lg hover:bg-red-200 transition-all">
+                            <span class="material-symbols-outlined icon-sm mr-1">thumb_down</span>Reject HSO
+                        </button>
+
+                        <!-- Waiting for FE to submit HSO -->
+                        <div id="hso-waiting-msg" class="hidden p-2 bg-amber-50 rounded-lg text-xs text-amber-700">
+                            <span class="material-symbols-outlined icon-sm mr-1">pending</span>Waiting for FE to submit HSO…
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Row 3: Timeline + Chat ──────────────────────────────────────── -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <!-- Timeline -->
+            <div class="bg-white rounded-2xl shadow-md flex flex-col" style="height:25rem">
+                <div class="p-3 border-b bg-gradient-to-r from-teal-600 to-cyan-600 text-white rounded-t-2xl">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <span class="material-symbols-outlined icon-md">history</span>
+                            <div>
+                                <h3 class="font-bold text-sm">Event Timeline</h3>
+                                <p class="text-xs text-teal-100">Full audit log</p>
+                            </div>
+                        </div>
+                        <button onclick="refreshTracker()" class="h-8 w-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center hover:bg-opacity-30">
+                            <span class="material-symbols-outlined icon-sm">sync</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="flex-1 overflow-y-auto p-4 bg-gray-50 rounded-b-2xl">
+                    <div id="timeline-container" class="space-y-3"></div>
+                </div>
+            </div>
+
+            <!-- Chat -->
+            <div>{% include 'chat_component.html' %}</div>
+        </div>
+    </div>
+</main>
+
+<!-- ── Image Viewer Modal ──────────────────────────────────────────────────── -->
+<div id="tracker-image-viewer-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50">
+    <div style="width:100%;height:100%;display:flex;flex-direction:column">
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;color:white">
+            <h3 id="tracker-viewer-title" style="font-size:14px;font-weight:600">Image</h3>
+            <div style="display:flex;gap:8px">
+                <button onclick="document.getElementById('tracker-download-image-btn').click()"
+                    class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30">
+                    <span class="material-symbols-outlined icon-sm">download</span>
+                </button>
+                <button onclick="closeTrackerImageModal()"
+                    class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30">
+                    <span class="material-symbols-outlined icon-sm">close</span>
+                </button>
+            </div>
+        </div>
+        <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:16px;min-height:0">
+            <img id="tracker-viewer-image" style="max-width:100%;max-height:100%;object-fit:contain" alt="Captured image">
+        </div>
+        <div style="padding:12px;display:flex;justify-content:center">
+            <button id="tracker-download-image-btn"
+                class="px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg hover:bg-teal-700 transition-all">
+                <span class="material-symbols-outlined icon-sm mr-2">download</span>Download
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Request Transfer Modal ──────────────────────────────────────────────── -->
+<div id="request-transfer-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full">
+        <div class="p-4 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-t-2xl">
+            <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold flex items-center gap-2">
+                    <span class="material-symbols-outlined icon-md">swap_horiz</span>
+                    Request Transfer
+                </h3>
+                <button onclick="closeRequestTransferModal()" class="h-8 w-8 bg-white bg-opacity-20 rounded-lg flex items-center justify-center hover:bg-opacity-30">
+                    <span class="material-symbols-outlined icon-sm">close</span>
+                </button>
+            </div>
+        </div>
+        <div class="p-4 space-y-3">
+            <div>
+                <label class="block text-xs font-bold text-gray-700 mb-1.5">Select Target NOC User</label>
+                <select id="target-noc-select" class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 text-sm">
+                    <option value="">-- Select NOC User --</option>
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-bold text-gray-700 mb-1.5">Reason for Transfer</label>
+                <textarea id="transfer-reason-input" rows="3" 
+                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 text-sm"
+                    placeholder="Explain why you need to transfer this tracker..."></textarea>
+            </div>
+            <div class="flex gap-2 pt-2">
+                <button onclick="closeRequestTransferModal()" 
+                    class="flex-1 px-4 py-2 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 font-semibold text-sm">
+                    Cancel
+                </button>
+                <button onclick="submitTransferRequest()" 
+                    class="flex-1 px-4 py-2 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-lg hover:shadow-lg font-semibold text-sm">
+                    <span class="material-symbols-outlined icon-sm mr-1">send</span>Submit Request
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// ─── State ─────────────────────────────────────────────────────────────────
+let trackerData = null;
+// True when the current user has the right to take action on this tracker
+let canAct = false;
+
+// ─── Bootstrap ─────────────────────────────────────────────────────────────
+async function loadTracker() {
+    console.log('[API] Loading tracker from API');
+    window.RealtimeHandler.lastUpdateSource = 'api';
+    
+    try {
+        const res  = await fetch(`/api/trackers/${trackerId}`);
+        const data = await res.json();
+        if (data.tracker) {
+            trackerData = data.tracker;
+            renderAll();
+        } else {
+            showToast('Tracker not found', 'error');
+            setTimeout(() => window.location.href = '/noc/dashboard', 2000);
+        }
+    } catch (e) {
+        console.error('loadTracker error:', e);
+        showToast('Failed to load tracker', 'error');
+    }
+}
+
+function renderAll() {
+    document.getElementById('loading-state').classList.add('hidden');
+    document.getElementById('content-container').classList.remove('hidden');
+
+    // Determine whether the current user can take actions on this tracker.
+    // NSG users are always read-only. NS users can act only on their own assigned trackers.
+    const isMyTracker = trackerData.noc_assignee === currentUserId;
+    const isUnassigned = !trackerData.noc_assignee;
+    
+    // Check if there's a pending reassignment request
+    const hasPendingRequest = trackerData.reassignment_request && 
+                              trackerData.reassignment_request.status === 'pending' &&
+                              trackerData.reassignment_request.from_noc_id === currentUserId;
+    
+    // User can act ONLY if: not NSG, is owner/unassigned, AND no pending transfer request
+    canAct = !isNSG && (isMyTracker || isUnassigned) && !hasPendingRequest;
+
+    renderHeader();
+    renderStatusCard(isUnassigned);
+    renderInfoCard();
+    renderFECard();
+    renderSimCards();
+    renderZtpCard();
+    renderQuickActions();
+    renderTimeline();
+}
+
+function renderHeader() {
+    document.getElementById('header-sdwan-id').textContent = trackerData.sdwan_id;
+    document.getElementById('header-customer').textContent  = trackerData.customer;
+}
+
+function renderStatusCard(isUnassigned) {
+    // Status badge
+    const si = getStatusInfo(trackerData.status);
+    const sb = document.getElementById('status-badge');
+    sb.className = `status-badge ${si.cls} text-xs`;
+    sb.innerHTML = `<span class="material-symbols-outlined icon-sm">${si.icon}</span><span>${si.label}</span>`;
+
+    // Assign button — show only if unassigned and the current user is an NS (not NSG)
+    const assignBtn = document.getElementById('assign-btn');
+    if (isUnassigned && !isNSG) {
+        assignBtn.classList.remove('hidden');
+    } else {
+        assignBtn.classList.add('hidden');
+    }
+
+    // Progress
+    const pct = calculateProgress();
+    document.getElementById('progress-percentage').textContent = `${pct}%`;
+    document.getElementById('progress-bar').style.width = `${pct}%`;
+
+    // Timestamps
+    document.getElementById('created-time').textContent = formatDateTime(trackerData.created_at);
+    document.getElementById('elapsed-time').textContent  = formatTimeAgo(trackerData.created_at);
+
+    // Queue wait = time from creation to NOC assignment
+    const assignedAt = trackerData.stage_timestamps?.noc_assigned_at;
+    if (assignedAt) {
+        const waitMins = (new Date(assignedAt) - new Date(trackerData.created_at)) / 60000;
+        document.getElementById('queue-wait-time').textContent = formatDuration(waitMins);
+    } else {
+        document.getElementById('queue-wait-time').textContent = trackerData.noc_assignee ? '-' : 'Awaiting';
+    }
+}
+
+function renderInfoCard() {
+    document.getElementById('tracker-id').textContent     = trackerData.tracker_id || '-';
+    document.getElementById('detail-sdwan-id').textContent = trackerData.sdwan_id;
+    document.getElementById('detail-customer').textContent = trackerData.customer;
+
+    const hso = trackerData.hso || {};
+    const hb  = document.getElementById('hso-status-badge');
+    const hStatusMap = {
+        'pending':   {cls:'bg-yellow-100 text-yellow-800', icon:'schedule',   label:'Pending'},
+        'submitted': {cls:'bg-blue-100 text-blue-800',     icon:'send',       label:'Submitted'},
+        'rejected':  {cls:'bg-red-100 text-red-800',       icon:'cancel',     label:'Rejected'},
+        'approved':  {cls:'bg-green-100 text-green-800',   icon:'check_circle',label:'Approved'},
+    };
+    const hs = hStatusMap[hso.status] || hStatusMap.pending;
+    hb.className = `status-badge ${hs.cls} text-xs`;
+    hb.innerHTML = `<span class="material-symbols-outlined icon-sm">${hs.icon}</span><span>${hs.label}</span>`;
+
+    const rejBox = document.getElementById('hso-rejection-box');
+    if (hso.status === 'rejected' && hso.rejection_reason) {
+        rejBox.classList.remove('hidden');
+        document.getElementById('hso-rejection-text').textContent = hso.rejection_reason;
+    } else {
+        rejBox.classList.add('hidden');
+    }
+
+    const attempts = (hso.attempts || []).length;
+    const attBox   = document.getElementById('hso-attempts-box');
+    if (attempts > 0) {
+        attBox.classList.remove('hidden');
+        document.getElementById('hso-attempts-count').textContent = attempts;
+    } else {
+        attBox.classList.add('hidden');
+    }
+}
+
+function renderFECard() {
+    const fe = trackerData.fe || {};
+    document.getElementById('fe-name').textContent  = fe.name || '-';
+    document.getElementById('fe-group').textContent = fe.field_engineer_group || '-';
+    const ph = document.getElementById('fe-phone');
+    ph.textContent = fe.phone || '-';
+    ph.href = `tel:${fe.phone || ''}`;
+    const em = document.getElementById('fe-email');
+    em.textContent = fe.email || '-';
+    em.href = `mailto:${fe.email || ''}`;
+}
+
+// ─── SIM Cards ──────────────────────────────────────────────────────────────
+function renderSimCards() {
+    renderSingleSim('sim1', trackerData.sim?.sim1);
+    renderSingleSim('sim2', trackerData.sim?.sim2);
+}
+
+function renderSingleSim(key, simData) {
+    if (!simData) return;
+
+    // SIM2 not required
+    if (key === 'sim2' && simData.status === 'not_required') {
+        document.getElementById('sim2-card').innerHTML = `
+            <p class="text-center text-gray-400 text-xs py-4">SIM 2 not required for this installation</p>`;
+        return;
+    }
+
+    document.getElementById(`${key}-provider`).textContent = simData.provider || '-';
+    document.getElementById(`${key}-number`).textContent   = simData.number || '-';
+
+    // Image buttons
+    const imgs = simData.images || [];
+    const provImg = imgs.find(i => i.field === 'provider');
+    const numImg  = imgs.find(i => i.field === 'number');
+    document.getElementById(`${key}-provider-img-btn`).classList.toggle('hidden', !(provImg?.data));
+    document.getElementById(`${key}-number-img-btn`).classList.toggle('hidden',   !(numImg?.data));
+
+    // Status badge
+    const si = getSimStatusInfo(simData.status);
+    const badge = document.getElementById(`${key}-status-badge`);
+    badge.className = `status-badge ${si.cls} text-xs`;
+    badge.innerHTML = `<span class="material-symbols-outlined icon-sm">${si.icon}</span><span>${si.label}</span>`;
+
+    // Attempt history counter
+    const attempts = simData.attempts || [];
+    const attInfo  = document.getElementById(`${key}-attempts-info`);
+    if (attempts.length > 1) {
+        attInfo.classList.remove('hidden');
+        document.getElementById(`${key}-attempt-count`).textContent = attempts.length;
+    } else {
+        attInfo.classList.add('hidden');
+    }
+
+    // Timer / failure divs
+    const timerDiv   = document.getElementById(`${key}-timer`);
+    const failureDiv = document.getElementById(`${key}-failure`);
+    const actionsDiv = document.getElementById(`${key}-actions`);
+
+    const startBtn       = document.getElementById(`${key}-start-btn`);
+    const preactivatedBtn= document.getElementById(`${key}-preactivated-btn`);
+    const completeBtn    = document.getElementById(`${key}-complete-btn`);
+    const failedBtn      = document.getElementById(`${key}-failed-btn`);
+
+    // Reset visibility first
+    timerDiv.classList.add('hidden');
+    failureDiv.classList.add('hidden');
+    actionsDiv.classList.remove('hidden');
+    startBtn.classList.remove('hidden');
+    preactivatedBtn.classList.remove('hidden');
+    completeBtn.classList.add('hidden');
+    failedBtn.classList.add('hidden');
+
+    if (simData.status === 'activation_in_process') {
+        timerDiv.classList.remove('hidden');
+        startBtn.classList.add('hidden');
+        preactivatedBtn.classList.add('hidden');
+        completeBtn.classList.remove('hidden');
+        failedBtn.classList.remove('hidden');
+
+    } else if (simData.status === 'activation_failed') {
+        failureDiv.classList.remove('hidden');
+        document.getElementById(`${key}-failure-reason`).textContent = simData.failure_reason || 'Unknown';
+        // Allow retry — show both start and preactivated again
+        startBtn.classList.remove('hidden');
+        preactivatedBtn.classList.remove('hidden');
+        completeBtn.classList.add('hidden');
+        failedBtn.classList.add('hidden');
+
+    } else if (['activation_complete_manual','activation_complete_preactivated'].includes(simData.status)) {
+        timerDiv.classList.add('hidden');
+        failureDiv.classList.add('hidden');
+        actionsDiv.classList.add('hidden');  // All done, no further actions
+
+    } else {
+        // pending — default buttons already set above
+    }
+
+    // Disable all action buttons for non-owners or NSG
+    if (!canAct) lockDiv(actionsDiv);
+}
+
+// ─── ZTP Card ───────────────────────────────────────────────────────────────
+function renderZtpCard() {
+    const ztp      = trackerData.ztp || {};
+    const firmware = trackerData.firmware || {};
+    const router   = trackerData.router || {};
+
+    // Populate Make, Model, and Firmware
+    document.getElementById('router-make').textContent = router.make || '-';
+    document.getElementById('router-model').textContent = router.type || '-';
+    document.getElementById('firmware-version').textContent = firmware.version || '-';
+    const fwImgBtn = document.getElementById('firmware-img-btn');
+    fwImgBtn.classList.toggle('hidden', !(firmware.images?.length && firmware.images[0]?.data));
+
+    // Config badge
+    const configMap = {
+        'pending':        {cls:'bg-gray-100 text-gray-800',   icon:'schedule',label:'Pending'},
+        'config_verified':{cls:'bg-green-100 text-green-800', icon:'verified',label:'Config OK'},
+        'config_failed':  {cls:'bg-red-100 text-red-800',     icon:'error',   label:'Config Issue'},
+    };
+    const cs = configMap[ztp.config_status] || configMap.pending;
+    const cb = document.getElementById('ztp-config-badge');
+    cb.className = `status-badge ${cs.cls} text-xs`;
+    cb.innerHTML = `<span class="material-symbols-outlined icon-sm">${cs.icon}</span><span>${cs.label}</span>`;
+
+    // Show config failure reason if applicable
+    const cfDiv = document.getElementById('ztp-config-failure');
+    if (ztp.config_status === 'config_failed' && ztp.config_failure_reason) {
+        cfDiv.classList.remove('hidden');
+        cfDiv.textContent = ztp.config_failure_reason;
+    } else {
+        cfDiv.classList.add('hidden');
+    }
+
+    // Config action buttons — hide once config has been verified or failed (allow re-verify on fail)
+    const configActions = document.getElementById('ztp-config-actions');
+    if (ztp.config_status === 'config_verified') {
+        configActions.classList.add('hidden');
+    } else {
+        configActions.classList.remove('hidden');
+        if (!canAct) lockDiv(configActions);
+    }
+
+    // ZTP execution badge
+    const ztpMap = {
+        'pending':       {cls:'bg-gray-100 text-gray-800',  icon:'schedule',       label:'Pending'},
+        'initiated':     {cls:'bg-blue-100 text-blue-800',  icon:'progress_activity',label:'Running'},
+        'fe_completed':  {cls:'bg-amber-100 text-amber-800',icon:'pending',        label:'FE Done — Verify'},
+        'completed':     {cls:'bg-green-100 text-green-800',icon:'check_circle',   label:'Completed'},
+        'failed':        {cls:'bg-red-100 text-red-800',    icon:'cancel',         label:'Failed'},
+    };
+    const zs  = ztpMap[ztp.status] || ztpMap.pending;
+    const zsb = document.getElementById('ztp-status-badge');
+    zsb.className = `status-badge ${zs.cls} text-xs`;
+    zsb.innerHTML = `<span class="material-symbols-outlined icon-sm">${zs.icon}</span><span>${zs.label}</span>`;
+
+    // "Who performed ZTP" pill
+    const perfInfo = document.getElementById('ztp-performer-info');
+    if (ztp.performed_by && ztp.status === 'completed') {
+        perfInfo.classList.remove('hidden');
+        perfInfo.innerHTML = `<span class="material-symbols-outlined icon-sm mr-1">person</span>ZTP performed by: ${ztp.performed_by === 'FE' ? 'Field Engineer' : 'NOC Support'}`;
+    } else {
+        perfInfo.classList.add('hidden');
+    }
+
+    // Timer
+    document.getElementById('ztp-timer').classList.toggle('hidden', ztp.status !== 'initiated');
+
+    // Failure
+    const failDiv = document.getElementById('ztp-failure');
+    if (ztp.status === 'failed' && ztp.failure_reason) {
+        failDiv.classList.remove('hidden');
+        document.getElementById('ztp-failure-reason').textContent = ztp.failure_reason;
+    } else {
+        failDiv.classList.add('hidden');
+    }
+
+    // "FE reported done, waiting NS verify" banner
+    document.getElementById('ztp-fe-pending-verify').classList.toggle('hidden', ztp.status !== 'fe_completed');
+
+    // NS-perform ZTP buttons: shown when FE requested NS to do ZTP (fe_requested_ns=true)
+    // and ZTP not yet completed
+    const nsActions   = document.getElementById('ztp-ns-actions');
+    const verifyFe    = document.getElementById('ztp-verify-fe-actions');
+    const nsStart     = document.getElementById('ztp-ns-start-btn');
+    const nsComplete  = document.getElementById('ztp-ns-complete-btn');
+    const nsFailed    = document.getElementById('ztp-ns-failed-btn');
+
+    // Hide both action sections first
+    nsStart.classList.add('hidden');
+    nsComplete.classList.add('hidden');
+    nsFailed.classList.add('hidden');
+    verifyFe.classList.add('hidden');
+
+    if (ztp.status === 'fe_completed') {
+        // FE reported done — NS needs to verify
+        verifyFe.classList.remove('hidden');
+        if (!canAct) lockDiv(verifyFe);
+    } else if (ztp.fe_requested_ns && ztp.status !== 'completed') {
+        // FE requested NS to perform ZTP
+        if (ztp.status === 'initiated') {
+            nsComplete.classList.remove('hidden');
+            nsFailed.classList.remove('hidden');
+        } else if (ztp.status === 'failed') {
+            nsStart.classList.remove('hidden');
+        } else {
+            nsStart.classList.remove('hidden');
+        }
+        if (!canAct) lockDiv(nsActions);
+    }
+
+    // ZTP execution section is shown only once SIMs are done (at least one success)
+    const execSection = document.getElementById('ztp-execution-section');
+    const sim1OK = ['activation_complete_manual','activation_complete_preactivated'].includes(trackerData.sim?.sim1?.status);
+    const sim2OK = ['activation_complete_manual','activation_complete_preactivated'].includes(trackerData.sim?.sim2?.status);
+    const hasGoodSim = sim1OK || sim2OK;
+    execSection.classList.toggle('hidden', !hasGoodSim && ztp.status === 'pending');
+}
+
+// ─── Quick Actions ──────────────────────────────────────────────────────────
+function renderQuickActions() {
+    const status = trackerData.status;
+    const ztp    = trackerData.ztp || {};
+    const hso    = trackerData.hso || {};
+    const isMyTracker = trackerData.noc_assignee === currentUserId;
+
+    // Handle pending reassignment request status
+    const pendingRequestStatus = document.getElementById('pending-request-status');
+    const requestTransferBtn = document.getElementById('request-transfer-btn');
+    const revokeRequestBtn = document.getElementById('revoke-request-btn');
+    const trackerLockedMsg = document.getElementById('tracker-locked-msg');
+    const reassignmentRequest = trackerData.reassignment_request;
+    
+    const hasPendingRequest = reassignmentRequest && 
+                              reassignmentRequest.status === 'pending' &&
+                              reassignmentRequest.from_noc_id === currentUserId;
+    
+    if (hasPendingRequest) {
+        // Show pending request status
+        pendingRequestStatus.classList.remove('hidden');
+        document.getElementById('pending-target-noc').textContent = reassignmentRequest.to_noc_name;
+        document.getElementById('pending-reason').textContent = reassignmentRequest.reason;
+        document.getElementById('pending-time').textContent = formatTimeAgo(reassignmentRequest.requested_at);
+        
+        // Show revoke button
+        revokeRequestBtn.classList.remove('hidden');
+        
+        // Hide request transfer button
+        requestTransferBtn.classList.add('hidden');
+        
+        // Show locked message
+        trackerLockedMsg.classList.remove('hidden');
+        
+        // Disable all other actions - return early
+        return;
+    } else {
+        // Hide pending request status
+        pendingRequestStatus.classList.add('hidden');
+        revokeRequestBtn.classList.add('hidden');
+        trackerLockedMsg.classList.add('hidden');
+        
+        // Show/hide request transfer button based on tracker status and ownership
+        if (status === 'installation_complete' || !isMyTracker || isNSG) {
+            requestTransferBtn.classList.add('hidden');
+        } else {
+            requestTransferBtn.classList.remove('hidden');
+        }
+    }
+    
+    // If user can't act (NSG or not owner), hide everything else
+    if (!canAct) return;
+
+    const readyBtn    = document.getElementById('ready-btn');
+    const hsoSection  = document.getElementById('hso-action-section');
+    const approveBtn  = document.getElementById('approve-hso-btn');
+    const rejectBtn   = document.getElementById('reject-hso-btn');
+    const waitingMsg  = document.getElementById('hso-waiting-msg');
+
+    // "Ready for Coordination" button — enabled when at least one SIM + ZTP complete
+    const sim1OK = ['activation_complete_manual','activation_complete_preactivated'].includes(trackerData.sim?.sim1?.status);
+    const sim2OK = ['activation_complete_manual','activation_complete_preactivated'].includes(trackerData.sim?.sim2?.status);
+    const sim2NR = trackerData.sim?.sim2?.status === 'not_required';
+    const simsDone  = sim1OK || sim2OK;
+    const sim2Done  = sim2OK || sim2NR;
+    const ztpDone   = ztp.status === 'completed';
+    const allReady  = simsDone && ztpDone;
+
+    if (['installation_complete'].includes(status)) {
+        readyBtn.disabled = true;
+        readyBtn.className = 'w-full px-2 py-1.5 text-xs bg-gray-400 text-white font-semibold rounded-lg cursor-not-allowed';
+        readyBtn.innerHTML = '<span class="material-symbols-outlined icon-sm mr-1">check</span>Installation Complete';
+    } else if (['ready_for_coordination','fe_requested_ztp','hso_submitted','hso_rejected','ztp_pull_verified','ztp_pull_done_by_noc'].includes(status)) {
+        readyBtn.disabled = true;
+        readyBtn.className = 'w-full px-2 py-1.5 text-xs bg-gray-400 text-white font-semibold rounded-lg cursor-not-allowed';
+        readyBtn.innerHTML = '<span class="material-symbols-outlined icon-sm mr-1">check</span>Already Marked Ready';
+    } else if (allReady) {
+        readyBtn.disabled = false;
+        readyBtn.className = 'w-full px-2 py-1.5 text-xs bg-gradient-to-r from-green-600 to-green-700 text-white font-semibold rounded-lg hover:shadow-lg transition-all action-btn';
+        readyBtn.innerHTML = '<span class="material-symbols-outlined icon-sm mr-1">check_circle</span>Mark Ready for Coordination';
+    } else {
+        readyBtn.disabled = true;
+        readyBtn.className = 'w-full px-2 py-1.5 text-xs bg-gray-300 text-gray-500 font-semibold rounded-lg cursor-not-allowed';
+        readyBtn.innerHTML = '<span class="material-symbols-outlined icon-sm mr-1">lock</span>Complete SIM &amp; ZTP First';
+    }
+
+    // HSO section visibility
+    if (['ready_for_coordination','fe_requested_ztp','hso_submitted','hso_rejected','ztp_pull_verified','ztp_pull_done_by_noc'].includes(status)) {
+        hsoSection.classList.remove('hidden');
+    } else {
+        hsoSection.classList.add('hidden');
+        return;
+    }
+
+    // HSO approve/reject buttons
+    approveBtn.classList.add('hidden');
+    rejectBtn.classList.add('hidden');
+    waitingMsg.classList.add('hidden');
+
+    if (hso.status === 'submitted') {
+        approveBtn.classList.remove('hidden');
+        rejectBtn.classList.remove('hidden');
+    } else if (hso.status === 'approved') {
+        // Already done
+    } else {
+        waitingMsg.classList.remove('hidden');
+    }
+}
+
+// ─── Timeline ───────────────────────────────────────────────────────────────
+function renderTimeline() {
+    const container = document.getElementById('timeline-container');
+    const events = [...(trackerData.events || [])].reverse();
+
+    if (!events.length) {
+        container.innerHTML = `<div class="text-center text-gray-400 text-sm py-8">No events yet</div>`;
+        return;
+    }
+
+    const stageIconMap = {
+        'tracker_created':           {icon:'add_circle',   color:'bg-teal-500'},
+        'noc_assigned':              {icon:'assignment_ind',color:'bg-blue-500'},
+        'sim1_activation_in_process':{icon:'sim_card',     color:'bg-indigo-400'},
+        'sim1_activation_complete_manual':{icon:'check',   color:'bg-green-500'},
+        'sim1_activation_complete_preactivated':{icon:'done_all',color:'bg-green-500'},
+        'sim1_activation_failed':    {icon:'close',        color:'bg-red-500'},
+        'sim2_activation_in_process':{icon:'sim_card',     color:'bg-indigo-400'},
+        'sim2_activation_complete_manual':{icon:'check',   color:'bg-green-500'},
+        'sim2_activation_complete_preactivated':{icon:'done_all',color:'bg-green-500'},
+        'sim2_activation_failed':    {icon:'close',        color:'bg-red-500'},
+        'ztp_config_verified':       {icon:'verified',     color:'bg-cyan-500'},
+        'ztp_config_failed':         {icon:'error',        color:'bg-orange-500'},
+        'ztp_initiated_by_fe':       {icon:'play_circle',  color:'bg-purple-400'},
+        'ztp_initiated_by_noc':      {icon:'play_circle',  color:'bg-purple-600'},
+        'ztp_completed_by_fe':       {icon:'task_alt',     color:'bg-green-400'},
+        'ztp_completed_by_noc':      {icon:'task_alt',     color:'bg-green-600'},
+        'ztp_fe_completion_verified':{icon:'check_circle', color:'bg-green-600'},
+        'ztp_failed':                {icon:'cancel',       color:'bg-red-500'},
+        'fe_requested_noc_ztp':      {icon:'sos',          color:'bg-amber-500'},
+        'ready_for_coordination':    {icon:'call',         color:'bg-teal-600'},
+        'hso_submitted':             {icon:'send',         color:'bg-blue-500'},
+        'hso_approved':              {icon:'thumb_up',     color:'bg-green-600'},
+        'hso_rejected':              {icon:'thumb_down',   color:'bg-red-500'},
+        'installation_complete':     {icon:'verified_user',color:'bg-emerald-600'},
+    };
+
+    container.innerHTML = events.map((ev, i) => {
+        const si = stageIconMap[ev.stage] || {icon:'circle', color:'bg-gray-400'};
+        return `
+        <div class="flex gap-3">
+            <div class="h-9 w-9 rounded-full ${si.color} flex items-center justify-center flex-shrink-0">
+                <span class="material-symbols-outlined icon-sm text-white">${si.icon}</span>
+            </div>
+            <div class="flex-1 bg-white rounded-xl p-2.5 shadow-sm">
+                <h4 class="text-xs font-bold text-gray-900 mb-0.5">${formatStage(ev.stage)}</h4>
+                <p class="text-xs text-gray-600 mb-0.5">${ev.remarks || ''}</p>
+                <p class="text-xs text-gray-400">${formatDateTime(ev.timestamp)}</p>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ─── API Actions ────────────────────────────────────────────────────────────
+async function assignTracker() {
+    showLoading();
+    try {
+        const res = await fetch(`/api/trackers/${trackerId}/assign`, {method:'POST'});
+        const d   = await res.json();
+        if (d.success) { showToast('Tracker assigned to you', 'success'); await loadTracker(); }
+        else showToast(d.error || 'Failed to assign', 'error');
+    } catch(e) { showToast('Network error', 'error'); }
+    hideLoading();
+}
+
+async function callApi(url, body, successMsg) {
+    showLoading();
+    try {
+        const res = await fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        const d   = await res.json();
+        if (d.success || !d.error) {
+            showToast(d.message || successMsg, 'success');
+            await loadTracker();
+            if (typeof loadChat === 'function') loadChat();
+        } else {
+            showToast(d.error || 'Action failed', 'error');
+        }
+    } catch(e) { showToast('Network error', 'error'); }
+    hideLoading();
+}
+
+async function startSimActivation(simKey) {
+    await callApi(`/api/trackers/${trackerId}/sim/${simKey}/status`,
+        {status:'activation_in_process', remarks:`${simKey.toUpperCase()} activation started`},
+        'Activation started');
+}
+
+async function markSimComplete(simKey, status) {
+    await callApi(`/api/trackers/${trackerId}/sim/${simKey}/status`,
+        {status, remarks:`${simKey.toUpperCase()} ${status === 'activation_complete_manual' ? 'manually activated' : 'pre-activated'}`},
+        'SIM activation complete');
+}
+
+async function markSimFailed(simKey) {
+    const reasons = await loadReasons('sim_activation_failure');
+    const reason  = await promptReason('SIM Activation Failure Reason', reasons);
+    if (!reason) return;
+    await callApi(`/api/trackers/${trackerId}/sim/${simKey}/status`,
+        {status:'activation_failed', failure_reason:reason, remarks:`${simKey.toUpperCase()} activation failed: ${reason}`},
+        'SIM failure recorded');
+}
+
+async function verifyZtpConfig(result) {
+    let failure_reason = null;
+    if (result === 'failed') {
+        failure_reason = prompt('Describe the ZTP config issue:');
+        if (!failure_reason) return;
+    }
+    await callApi(`/api/trackers/${trackerId}/ztp/config`,
+        {result, failure_reason, remarks:`ZTP config ${result}`},
+        `ZTP config marked as ${result}`);
+}
+
+async function updateZtpStatus(status) {
+    let failureReason = null;
+    if (status === 'failed') {
+        const reasons = await loadReasons('ztp_failure');
+        failureReason = await promptReason('ZTP Failure Reason', reasons);
+        if (!failureReason) return;
+    }
+    await callApi(`/api/trackers/${trackerId}/ztp/status`,
+        {status, failure_reason:failureReason, remarks:`ZTP ${status}`},
+        `ZTP ${status}`);
+}
+
+async function markReadyForCoordination() {
+    if (!confirm('Mark this tracker as ready for FE coordination? This will unlock the chat.')) return;
+    await callApi(`/api/trackers/${trackerId}/ready-for-coordination`, {},
+        'Chat unlocked. Ready for FE coordination.');
+}
+
+async function approveHSO() {
+    const remarks = prompt('Optional approval remarks (press Enter to skip):') || 'HSO approved';
+    if (remarks === null) return;  // user pressed Cancel
+    await callApi(`/api/trackers/${trackerId}/hso/approve`, {remarks}, 'HSO approved. Installation complete!');
+}
+
+async function rejectHSO() {
+    const reasons = await loadReasons('hso_rejection');
+    const reason  = await promptReason('HSO Rejection Reason', reasons);
+    if (!reason) return;
+    await callApi(`/api/trackers/${trackerId}/hso/reject`, {reason},
+        'HSO rejected. FE notified to re-submit.');
+}
+
+// ─── Utilities ──────────────────────────────────────────────────────────────
+function calculateProgress() {
+    // If installation is complete, return 100%
+    if (trackerData.status === 'installation_complete') {
+        return 100;
+    }
+    
+    const stages = (trackerData.events || []).map(e => e.stage);
+    let done = 0;
+    if (stages.includes('tracker_created'))  done++;
+    if (stages.includes('noc_assigned'))     done++;
+    const sim1OK = stages.some(s => s.includes('sim1_activation_complete'));
+    const sim2OK = stages.some(s => s.includes('sim2_activation_complete'));
+    if (sim1OK || sim2OK) done++;
+    if (stages.includes('ztp_config_verified')) done++;
+    // Check for ZTP completion - new workflow or old workflow
+    if (stages.includes('ztp_fe_completion_verified') || stages.includes('ztp_completed_by_noc') || 
+        stages.includes('ztp_pull_verification') || stages.includes('ztp_pull_action')) done++;
+    if (stages.includes('ready_for_coordination')) done++;
+    if (stages.includes('hso_submitted'))  done++;
+    if (stages.includes('hso_approved'))   done++;
+    return Math.round((done / 8) * 100);
+}
+
+function getStatusInfo(status) {
+    const m = {
+        'waiting_noc_assignment':       {cls:'bg-yellow-100 text-yellow-800', icon:'schedule',         label:'Awaiting NOC'},
+        'noc_working':                  {cls:'bg-blue-100 text-blue-800',     icon:'progress_activity', label:'NOC Working'},
+        'ztp_config_pending':           {cls:'bg-blue-100 text-blue-800',     icon:'settings',          label:'ZTP Config Pending'},
+        'ztp_config_unverified':        {cls:'bg-orange-100 text-orange-800', icon:'warning',           label:'ZTP Config Unverified'},
+        'ztp_pull_pending':             {cls:'bg-blue-100 text-blue-800',     icon:'download',          label:'ZTP Pull Pending'},
+        'ztp_pull_done_by_fe':          {cls:'bg-purple-100 text-purple-800', icon:'check_circle',      label:'ZTP Done by FE - Verify'},
+        'ztp_pull_unverified':          {cls:'bg-orange-100 text-orange-800', icon:'warning',           label:'ZTP Pull Unverified'},
+        'ztp_pull_requested_from_noc':  {cls:'bg-amber-100 text-amber-800',   icon:'sos',               label:'FE Needs Help'},
+        'ztp_pull_verified':            {cls:'bg-green-100 text-green-800',   icon:'verified',          label:'ZTP Complete'},
+        'ztp_pull_done_by_noc':         {cls:'bg-green-100 text-green-800',   icon:'verified',          label:'ZTP Complete'},
+        'fe_requested_ztp':             {cls:'bg-amber-100 text-amber-800',   icon:'sos',               label:'FE Needs Help'},
+        'ready_for_coordination':       {cls:'bg-teal-100 text-teal-800',     icon:'call',              label:'Ready — Chat Open'},
+        'hso_submitted':                {cls:'bg-indigo-100 text-indigo-800', icon:'send',              label:'HSO Submitted'},
+        'hso_rejected':                 {cls:'bg-red-100 text-red-800',       icon:'cancel',            label:'HSO Rejected'},
+        'installation_complete':        {cls:'bg-green-100 text-green-800',   icon:'verified_user',     label:'Complete'},
+    };
+    return m[status] || {cls:'bg-gray-100 text-gray-800', icon:'help', label:status};
+}
+
+function getSimStatusInfo(status) {
+    const m = {
+        'pending':                        {cls:'bg-gray-100 text-gray-800',   icon:'schedule',         label:'Pending'},
+        'activation_in_process':          {cls:'bg-blue-100 text-blue-800',   icon:'progress_activity',label:'Activating'},
+        'activation_complete_manual':     {cls:'bg-green-100 text-green-800', icon:'check',            label:'Activated'},
+        'activation_complete_preactivated':{cls:'bg-green-100 text-green-800',icon:'done_all',         label:'Pre-activated'},
+        'activation_failed':              {cls:'bg-red-100 text-red-800',     icon:'close',            label:'Failed'},
+    };
+    return m[status] || {cls:'bg-gray-100 text-gray-800', icon:'help', label:status};
+}
+
+async function loadReasons(category) {
+    try {
+        const res = await fetch(`/api/config/reasons/${category}`);
+        const d   = await res.json();
+        return d.reasons || [];
+    } catch { return []; }
+}
+
+async function promptReason(title, reasons) {
+    const opts = reasons.map((r, i) => `${i+1}. ${r}`).join('\n');
+    const raw  = prompt(`${title}\n\n${opts ? opts + '\n\nEnter number or type custom reason:' : 'Enter reason:'}`);
+    if (!raw) return null;
+    const idx = parseInt(raw) - 1;
+    return (idx >= 0 && idx < reasons.length) ? reasons[idx] : raw.trim();
+}
+
+function lockDiv(div) {
+    if (!div) return;
+    div.querySelectorAll('button').forEach(btn => {
+        btn.disabled = true;
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        btn.classList.remove('hover:bg-blue-200','hover:bg-green-200','hover:bg-red-200',
+                             'hover:bg-green-700','hover:shadow-lg');
+    });
+}
+
+// ─── Timers (tick every second, correct for UTC→local conversion) ───────────
+function updateTimers() {
+    if (!trackerData) return;
+    tickSimTimer('sim1', trackerData.sim?.sim1);
+    tickSimTimer('sim2', trackerData.sim?.sim2);
+    tickZtpTimer();
+}
+
+function tickSimTimer(key, simData) {
+    if (!simData || simData.status !== 'activation_in_process') return;
+    const startedAt = simData.activation_started_at;
+    if (!startedAt) return;
+    // All timestamps are UTC ISO strings; new Date() parses 'Z'-suffixed strings correctly
+    const elapsedSec = Math.max(0, Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000));
+    const el = document.getElementById(`${key}-elapsed`);
+    if (el) el.textContent = fmtElapsed(elapsedSec);
+}
+
+function tickZtpTimer() {
+    const ztp = trackerData.ztp;
+    if (!ztp || ztp.status !== 'initiated' || !ztp.initiated_at) return;
+    const elapsedSec = Math.max(0, Math.floor((Date.now() - new Date(ztp.initiated_at).getTime()) / 1000));
+    const el = document.getElementById('ztp-elapsed');
+    if (el) el.textContent = fmtElapsed(elapsedSec);
+}
+
+function fmtElapsed(sec) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+}
+
+function formatDuration(mins) {
+    if (mins === null || mins === undefined) return '-';
+    if (mins < 60) return `${Math.round(mins)}m`;
+    return `${Math.floor(mins/60)}h ${Math.round(mins%60)}m`;
+}
+
+function formatStage(stage) {
+    return stage.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+
+// ─── Image Viewing ──────────────────────────────────────────────────────────
+function viewSimImages(simKey, field) {
+    const imgs = trackerData?.sim?.[simKey]?.images || [];
+    const img  = imgs.find(i => i.field === field);
+    if (img?.data) showImageModal(img.data, `${simKey.toUpperCase()} ${field}`);
+    else showToast('No image available', 'error');
+}
+
+function viewFirmwareImages() {
+    const imgs = trackerData?.firmware?.images || [];
+    if (imgs[0]?.data) showImageModal(imgs[0].data, 'Firmware Version');
+    else showToast('No image available', 'error');
+}
+
+function showImageModal(data, title) {
+    document.getElementById('tracker-viewer-image').src = data;
+    document.getElementById('tracker-viewer-title').textContent = title;
+    document.getElementById('tracker-download-image-btn').onclick = () => {
+        const a = document.createElement('a');
+        a.href = data;
+        a.download = `${title.replace(/\s+/g,'_')}_${Date.now()}.jpg`;
+        a.click();
+    };
+    document.getElementById('tracker-image-viewer-modal').classList.remove('hidden');
+}
+
+function closeTrackerImageModal() {
+    document.getElementById('tracker-image-viewer-modal').classList.add('hidden');
+}
+
+async function refreshTracker() {
+    document.getElementById('refresh-icon').classList.add('fa-spin');
+    await loadTracker();
+    setTimeout(() => document.getElementById('refresh-icon').classList.remove('fa-spin'), 500);
+}
+
+// ─── Request Transfer Functions ─────────────────────────────────────────────
+let nocUsersList = [];
+
+async function showRequestTransferModal() {
+    // Load NOC users list
+    try {
+        const res = await fetch('/api/noc-users');
+        const data = await res.json();
+        if (data.noc_users) {
+            nocUsersList = data.noc_users;
+            const select = document.getElementById('target-noc-select');
+            select.innerHTML = '<option value="">-- Select NOC User --</option>' + 
+                nocUsersList.map(u => `<option value="${u._id}">${u.name || u.username}</option>`).join('');
+        }
+    } catch (e) {
+        console.error('Failed to load NOC users:', e);
+    }
+    
+    // Clear previous inputs
+    document.getElementById('target-noc-select').value = '';
+    document.getElementById('transfer-reason-input').value = '';
+    
+    // Show modal
+    document.getElementById('request-transfer-modal').classList.remove('hidden');
+}
+
+function closeRequestTransferModal() {
+    document.getElementById('request-transfer-modal').classList.add('hidden');
+}
+
+async function submitTransferRequest() {
+    const targetNocId = document.getElementById('target-noc-select').value;
+    const reason = document.getElementById('transfer-reason-input').value.trim();
+    
+    if (!targetNocId) {
+        alert('Please select a target NOC user');
+        return;
+    }
+    
+    if (!reason) {
+        alert('Please provide a reason for the transfer');
+        return;
+    }
+    
+    try {
+        const res = await fetch(`/api/trackers/${trackerId}/request-reassignment`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                target_noc_id: targetNocId,
+                reason: reason
+            })
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('Transfer request submitted successfully!', 'success');
+            closeRequestTransferModal();
+            await loadTracker(); // Reload to show updated status
+        } else {
+            showToast(data.error || 'Failed to submit transfer request', 'error');
+        }
+    } catch (e) {
+        console.error('Error submitting transfer request:', e);
+        showToast('Network error. Please try again.', 'error');
+    }
+}
+
+async function revokeTransferRequest() {
+    if (!confirm('Revoke this transfer request? You will regain full access to the tracker.')) {
+        return;
+    }
+    
+    try {
+        const res = await fetch(`/api/trackers/${trackerId}/revoke-reassignment`, {
+            method: 'POST'
+        });
+        
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('Transfer request revoked successfully!', 'success');
+            await loadTracker(); // Reload to show updated status
+        } else {
+            showToast(data.error || 'Failed to revoke transfer request', 'error');
+        }
+    } catch (e) {
+        console.error('Error revoking transfer request:', e);
+        showToast('Network error. Please try again.', 'error');
+    }
+}
+
+// ─── Socket.IO Real-Time Updates ────────────────────────────────────────────
+// Custom handler for NOC page that uses existing renderAll() function
+function handleNOCTrackerUpdate(data) {
+    if (data.tracker_id !== trackerId) {
+        return; // Not for this tracker
+    }
+    
+    console.log('[Socket.IO] Tracker update received:', data.event_type);
+    
+    const config = window.REALTIME_CONFIG || { mode: 'hybrid' };
+    
+    // Check if complete tracker data is available
+    if (data.tracker && config.mode !== 'api') {
+        // Socket.IO-first: Update directly from Socket.IO data
+        console.log('[Socket.IO] Updating tracker from Socket.IO data');
+        window.RealtimeHandler.lastUpdateSource = 'socket';
+        trackerData = data.tracker;
+        renderAll();
+    } else if (config.mode === 'hybrid') {
+        // Hybrid mode: Try Socket.IO, fallback to API
+        if (data.tracker) {
+            console.log('[Socket.IO] Updating tracker from Socket.IO data');
+            window.RealtimeHandler.lastUpdateSource = 'socket';
+            trackerData = data.tracker;
+            renderAll();
+        } else {
+            console.log('[Socket.IO] No complete data, falling back to API');
+            loadTracker();
+        }
+    } else {
+        // API-only mode: Always use API
+        loadTracker();
+    }
+}
+
+// Join the tracker room for real-time updates
+if (typeof socket !== 'undefined') {
+    socket.emit('join_tracker', { tracker_id: trackerId });
+    
+    // Listen for tracker updates using custom NOC handler
+    socket.on('tracker_update', handleNOCTrackerUpdate);
+    
+    // Listen for dashboard updates (might affect this tracker)
+    socket.on('dashboard_update', function(data) {
+        console.log('[Socket.IO] Dashboard update received');
+        loadTracker();
+    });
+}
+
+// ─── Init ───────────────────────────────────────────────────────────────────
+loadTracker();
+setInterval(loadTracker, 15000);   // Refresh data every 15s
+setInterval(updateTimers, 1000);   // Tick timers every 1s
+</script>
+{% endblock %}

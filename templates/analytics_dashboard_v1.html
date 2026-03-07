@@ -1,0 +1,1815 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics Dashboard - SDWAN Tracker{% endblock %}
+
+{% block extra_css %}
+<!-- Cache buster: v4.0.0 - 2026-02-17 - Premium Compact Analytics UI -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
+<style>
+    :root {
+        --bg-0: #f7fbff;
+        --bg-1: #edf3f9;
+        --surface: rgba(255, 255, 255, 0.88);
+        --surface-solid: #ffffff;
+        --border: rgba(15, 23, 42, 0.08);
+        --border-strong: rgba(15, 23, 42, 0.16);
+        --text-primary: #0f172a;
+        --text-secondary: #475569;
+        --accent: #0f766e;
+        --accent-alt: #0369a1;
+        --accent-soft: rgba(15, 118, 110, 0.12);
+        --shadow-lg: 0 20px 45px -28px rgba(15, 23, 42, 0.45), 0 4px 14px rgba(15, 23, 42, 0.08);
+        --shadow-md: 0 12px 26px -22px rgba(15, 23, 42, 0.35), 0 2px 8px rgba(15, 23, 42, 0.08);
+        --radius-xl: 18px;
+        --radius-lg: 14px;
+    }
+
+    body {
+        font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+        background:
+            radial-gradient(circle at 0% 0%, rgba(14, 116, 144, 0.14), transparent 34%),
+            radial-gradient(circle at 100% 0%, rgba(30, 64, 175, 0.12), transparent 30%),
+            linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+        min-height: 100vh;
+        color: var(--text-primary);
+    }
+
+    body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        z-index: -1;
+        pointer-events: none;
+        background-image:
+            linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+        background-size: 38px 38px;
+        mask-image: radial-gradient(circle at center, black 30%, transparent 85%);
+    }
+
+    h1, h2, h3, .font-display {
+        font-family: 'Outfit', 'Manrope', sans-serif;
+        letter-spacing: -0.02em;
+    }
+
+    .material-symbols-outlined {
+        font-family: 'Material Symbols Outlined' !important;
+        font-weight: normal;
+        font-style: normal;
+        line-height: 1;
+        letter-spacing: normal;
+        text-transform: none;
+        display: inline-block;
+        white-space: nowrap;
+        word-wrap: normal;
+        direction: ltr;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+        font-feature-settings: 'liga';
+        vertical-align: middle;
+    }
+
+    .icon-xs { font-size: 16px !important; }
+    .icon-sm { font-size: 18px !important; }
+    .icon-md { font-size: 20px !important; }
+    .icon-lg { font-size: 24px !important; }
+    .icon-xl { font-size: 28px !important; }
+    .icon-2xl { font-size: 32px !important; }
+
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes slideIn { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+    @keyframes scaleIn { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: scale(1); } }
+
+    .animate-fade-in { animation: fadeIn 0.6s ease-out; }
+    .animate-slide-in { animation: slideIn 0.6s ease-out; }
+    .animate-scale-in { animation: scaleIn 0.5s ease-out; }
+
+    .hero-header {
+        position: relative;
+        overflow: hidden;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.24);
+        background: linear-gradient(126deg, #0f766e 0%, #0e7490 48%, #1d4ed8 100%);
+        box-shadow: 0 20px 46px -28px rgba(2, 6, 23, 0.75);
+    }
+
+    .hero-header::before,
+    .hero-header::after {
+        content: '';
+        position: absolute;
+        border-radius: 9999px;
+        pointer-events: none;
+    }
+
+    .hero-header::before {
+        width: 340px;
+        height: 340px;
+        top: -180px;
+        right: -70px;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0) 72%);
+    }
+
+    .hero-header::after {
+        width: 260px;
+        height: 260px;
+        bottom: -130px;
+        left: 9%;
+        background: radial-gradient(circle, rgba(191, 219, 254, 0.32) 0%, rgba(191, 219, 254, 0) 72%);
+    }
+
+    .hero-inner { position: relative; z-index: 1; }
+
+    .logo-badge {
+        width: 72px;
+        height: 72px;
+        border-radius: 20px;
+        padding: 9px;
+        background: linear-gradient(145deg, rgba(255, 255, 255, 0.42), rgba(255, 255, 255, 0.18));
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 12px 26px -14px rgba(15, 23, 42, 0.65);
+        backdrop-filter: blur(8px);
+    }
+
+    .logo-badge svg {
+        width: 100%;
+        height: 100%;
+        display: block;
+    }
+
+    .hero-heading {
+        text-shadow: 0 6px 20px rgba(2, 6, 23, 0.42);
+    }
+
+    .hero-subtext {
+        margin-top: 0.25rem;
+        letter-spacing: 0.01em;
+        color: rgba(224, 242, 254, 0.95);
+    }
+
+    .user-chip {
+        background: rgba(255, 255, 255, 0.2);
+        border: 1px solid rgba(255, 255, 255, 0.35);
+        border-radius: 12px;
+        padding: 0.75rem 1rem;
+        backdrop-filter: blur(10px);
+        box-shadow: 0 10px 18px -16px rgba(2, 6, 23, 0.8);
+    }
+
+    .username-highlight {
+        color: #fef08a;
+        text-shadow: 0 1px 8px rgba(2, 6, 23, 0.28);
+    }
+
+    .logout-btn {
+        border: 1px solid rgba(254, 202, 202, 0.48);
+        background-color: #c30000;
+        border-radius: 12px;
+        padding: 0.72rem 1.1rem;
+        transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+        box-shadow: 0 12px 24px -16px rgba(127, 29, 29, 0.8);
+    }
+
+    .logout-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 14px 28px -16px rgba(127, 29, 29, 0.9);
+        filter: brightness(0.9);
+        background-color: #a00000;
+    }
+
+    .kpi-card {
+        display: flex;
+        align-items: center;
+        gap: 0.62rem;
+        background: linear-gradient(145deg, #ffffff, #f8fafc);
+        border-radius: 12px;
+        padding: 0.62rem 0.66rem;
+        box-shadow: 0 8px 20px -18px rgba(15, 23, 42, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+        border: 1px solid var(--border);
+        transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+        position: relative;
+        overflow: hidden;
+    }
+
+    .kpi-card::before {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(140deg, rgba(255, 255, 255, 0.45), rgba(255, 255, 255, 0));
+    }
+
+    .kpi-card::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+        background: linear-gradient(180deg, var(--accent), var(--accent-alt));
+        opacity: 0;
+        transition: opacity 0.2s ease;
+    }
+
+    .kpi-card:hover {
+        transform: translateY(-2px);
+        border-color: rgba(14, 116, 144, 0.24);
+        box-shadow: 0 14px 24px -20px rgba(2, 6, 23, 0.65), inset 0 1px 0 rgba(255, 255, 255, 0.84);
+    }
+
+    .kpi-card:hover::before {
+        opacity: 1;
+    }
+
+    .kpi-card:hover::after {
+        opacity: 1;
+    }
+
+    .kpi-strip {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.55rem;
+    }
+
+    .kpi-icon {
+        width: 2.2rem;
+        height: 2.2rem;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+
+    .kpi-icon .material-symbols-outlined {
+        font-size: 18px !important;
+    }
+
+    .kpi-icon-blue { background: rgba(59, 130, 246, 0.13); color: #2563eb; }
+    .kpi-icon-green { background: rgba(16, 185, 129, 0.14); color: #059669; }
+    .kpi-icon-amber { background: rgba(245, 158, 11, 0.15); color: #d97706; }
+    .kpi-icon-orange { background: rgba(249, 115, 22, 0.15); color: #ea580c; }
+
+    .kpi-label {
+        font-size: 0.63rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #64748b;
+        margin: 0;
+        line-height: 1.15;
+        white-space: nowrap;
+    }
+
+    .kpi-value {
+        margin-top: 0.14rem;
+        font-size: 1.05rem;
+        font-weight: 800;
+        line-height: 1;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+        overflow: hidden;
+    }
+
+    .chart-container {
+        background: var(--surface);
+        border-radius: var(--radius-xl);
+        padding: 1rem;
+        box-shadow: var(--shadow-lg);
+        border: 1px solid var(--border);
+        transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        backdrop-filter: blur(9px);
+    }
+
+    .chart-container:hover {
+        border-color: var(--border-strong);
+        box-shadow: 0 22px 42px -30px rgba(15, 23, 42, 0.65), 0 3px 11px rgba(15, 23, 42, 0.1);
+    }
+
+    .chart-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 0.6rem;
+    }
+
+    .chart-heading-wrap {
+        display: flex;
+        align-items: center;
+        gap: 0.6rem;
+        min-height: 36px;
+    }
+
+    .chart-title {
+        font-size: 1rem;
+        font-weight: 700;
+        color: #0f172a;
+    }
+
+    .action-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 0.45rem;
+    }
+
+    .action-btn {
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 0.58rem 0.8rem;
+        font-size: 0.79rem;
+        font-weight: 700;
+        line-height: 1.2;
+        white-space: nowrap;
+        transition: all 0.2s ease;
+    }
+
+    .action-btn:hover {
+        transform: translateY(-1px);
+    }
+
+    .action-btn-blue {
+        background: linear-gradient(145deg, rgba(219, 234, 254, 0.95), rgba(224, 242, 254, 0.95));
+        border-color: rgba(59, 130, 246, 0.2);
+        color: #1d4ed8;
+    }
+
+    .action-btn-blue:hover {
+        border-color: rgba(59, 130, 246, 0.4);
+        box-shadow: 0 10px 20px -18px rgba(37, 99, 235, 0.9);
+    }
+
+    .action-btn-green {
+        background: linear-gradient(145deg, rgba(209, 250, 229, 0.96), rgba(220, 252, 231, 0.94));
+        border-color: rgba(16, 185, 129, 0.22);
+        color: #047857;
+    }
+
+    .action-btn-green:hover {
+        border-color: rgba(16, 185, 129, 0.42);
+        box-shadow: 0 10px 20px -18px rgba(5, 150, 105, 0.8);
+    }
+
+    .back-btn {
+        border-radius: 10px;
+        padding: 0.54rem 0.76rem;
+        border: 1px solid var(--border);
+        background: linear-gradient(145deg, #f8fafc, #f1f5f9);
+        font-size: 0.8rem;
+        font-weight: 700;
+        line-height: 1.2;
+        white-space: nowrap;
+        color: #334155;
+        transition: all 0.2s ease;
+    }
+
+    .back-btn:hover {
+        border-color: var(--border-strong);
+        transform: translateY(-1px);
+    }
+
+    .chart-canvas {
+        position: relative;
+        height: 355px;
+        cursor: pointer;
+    }
+
+    .breadcrumb {
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        font-size: 0.82rem;
+        color: var(--text-secondary);
+        padding: 0.7rem 0.85rem;
+        background: var(--surface-solid);
+        border-radius: 12px;
+        box-shadow: var(--shadow-md);
+        border: 1px solid var(--border);
+    }
+
+    .breadcrumb-item {
+        cursor: pointer;
+        transition: all 0.2s ease;
+        font-weight: 600;
+        padding: 0.35rem 0.55rem;
+        border-radius: 8px;
+    }
+
+    .breadcrumb-item:hover {
+        color: var(--accent);
+        background: var(--accent-soft);
+    }
+
+    .breadcrumb-item.active {
+        color: var(--accent);
+        font-weight: 700;
+        background: var(--accent-soft);
+    }
+
+    .breadcrumb-separator {
+        color: #cbd5e1;
+        font-weight: 300;
+    }
+
+    .control-panel {
+        background: var(--surface);
+        border-radius: var(--radius-xl);
+        padding: 1rem;
+        border: 1px solid var(--border);
+        box-shadow: var(--shadow-lg);
+        backdrop-filter: blur(10px);
+    }
+
+    .panel-section {
+        background: linear-gradient(150deg, rgba(255, 255, 255, 0.95), rgba(248, 250, 252, 0.92));
+        border: 1px solid var(--border);
+        border-radius: var(--radius-lg);
+        padding: 0.9rem;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+        height: 100%;
+    }
+
+    .panel-title {
+        font-size: 0.74rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #334155;
+        margin-bottom: 0.6rem;
+        padding-bottom: 0.44rem;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+        display: flex;
+        align-items: center;
+        gap: 0.45rem;
+        white-space: nowrap;
+    }
+
+    .panel-title .material-symbols-outlined {
+        color: var(--accent);
+    }
+
+    .view-tab {
+        border: 1px solid var(--border);
+        background: #f8fafc;
+        color: #334155;
+        transition: all 0.22s ease;
+        font-weight: 700;
+        padding: 0.66rem 0.9rem;
+        border-radius: 12px;
+        font-size: 0.83rem;
+        line-height: 1.2;
+        white-space: nowrap;
+    }
+
+    .view-tab:hover {
+        border-color: var(--border-strong);
+        background: #f1f5f9;
+    }
+
+    .view-tab-active {
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-alt) 100%) !important;
+        color: #ffffff !important;
+        border-color: transparent;
+        box-shadow: 0 14px 24px -18px rgba(2, 132, 199, 0.9);
+    }
+
+    .view-tab:not(.view-tab-active) .material-symbols-outlined {
+        color: #64748b !important;
+    }
+
+    .date-btn {
+        border: 1px solid var(--border);
+        background: #f8fafc;
+        color: #334155;
+        transition: all 0.2s ease;
+        font-weight: 700;
+        padding: 0.58rem 0.75rem;
+        border-radius: 11px;
+        font-size: 0.79rem;
+        line-height: 1.2;
+        white-space: nowrap;
+    }
+
+    .date-btn:hover {
+        border-color: var(--border-strong);
+        background: #f1f5f9;
+    }
+
+    .date-btn-active {
+        background: linear-gradient(135deg, var(--accent) 0%, var(--accent-alt) 100%) !important;
+        color: #ffffff !important;
+        border-color: transparent;
+        box-shadow: 0 12px 20px -16px rgba(2, 132, 199, 0.82);
+    }
+
+    .view-tab-active .material-symbols-outlined,
+    .date-btn-active .material-symbols-outlined {
+        color: #ffffff !important;
+    }
+
+    #custom-range-picker {
+        margin-top: 0.65rem;
+        padding: 0.8rem;
+        border-radius: 12px;
+        background: linear-gradient(145deg, rgba(236, 254, 255, 0.9), rgba(240, 249, 255, 0.95));
+        border: 1px solid rgba(14, 116, 144, 0.18);
+        box-shadow: 0 10px 20px -24px rgba(15, 23, 42, 0.45);
+    }
+
+    #custom-range-picker label {
+        font-size: 0.74rem;
+        font-weight: 700;
+        color: #334155;
+    }
+
+    input[type="datetime-local"] {
+        width: 100%;
+        border: 1px solid rgba(148, 163, 184, 0.45);
+        border-radius: 9px;
+        background: #ffffff;
+        padding: 0.58rem 0.7rem;
+        font-size: 0.82rem;
+        color: #0f172a;
+        outline: none;
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    input[type="datetime-local"]:focus {
+        border-color: rgba(2, 132, 199, 0.55);
+        box-shadow: 0 0 0 3px rgba(125, 211, 252, 0.25);
+    }
+
+    .range-apply-btn {
+        width: 100%;
+        border: 1px solid rgba(2, 132, 199, 0.24);
+        border-radius: 10px;
+        padding: 0.58rem 0.78rem;
+        font-size: 0.79rem;
+        font-weight: 700;
+        line-height: 1.2;
+        color: #0c4a6e;
+        background: linear-gradient(145deg, rgba(186, 230, 253, 0.94), rgba(224, 242, 254, 0.96));
+        transition: all 0.2s ease;
+    }
+
+    .range-apply-btn:hover {
+        border-color: rgba(2, 132, 199, 0.42);
+        transform: translateY(-1px);
+    }
+
+    .range-apply-btn .material-symbols-outlined {
+        color: #0369a1;
+    }
+
+    main.container {
+        padding-top: 1rem;
+        padding-bottom: 1.7rem;
+        overflow-x: clip;
+    }
+
+    .control-panel,
+    .chart-container,
+    .breadcrumb {
+        outline: 1px solid rgba(255, 255, 255, 0.55);
+        outline-offset: -1px;
+    }
+
+    .view-tab:focus-visible,
+    .date-btn:focus-visible,
+    .action-btn:focus-visible,
+    .back-btn:focus-visible,
+    .logout-btn:focus-visible {
+        outline: 3px solid rgba(125, 211, 252, 0.45);
+        outline-offset: 1px;
+    }
+
+    @media (min-width: 1280px) {
+        .kpi-strip {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+    }
+
+    @media (max-width: 1024px) {
+        .chart-canvas {
+            height: 330px;
+        }
+    }
+
+    @media (max-width: 640px) {
+        .logo-badge {
+            width: 58px;
+            height: 58px;
+            border-radius: 16px;
+            padding: 7px;
+        }
+
+        .control-panel,
+        .chart-container {
+            padding: 0.82rem;
+        }
+
+        .panel-section {
+            padding: 0.78rem;
+        }
+
+        .kpi-strip {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .kpi-card {
+            padding: 0.56rem 0.56rem;
+            min-height: 68px;
+        }
+
+        .chart-canvas {
+            height: 288px;
+        }
+
+        .chart-toolbar {
+            flex-direction: column;
+            align-items: stretch;
+        }
+
+        .action-row {
+            justify-content: flex-start;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .animate-fade-in,
+        .animate-slide-in,
+        .animate-scale-in {
+            animation: none;
+        }
+    }
+</style>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+{% endblock %}
+
+{% block content %}
+<header class="hero-header animate-fade-in">
+    <div class="hero-inner container mx-auto max-w-7xl px-5 sm:px-8" style="padding-top: 0.75rem; padding-bottom: 0.75rem;">
+        <div class="flex items-center justify-between" style="gap: 0.75rem;">
+            <div class="flex items-center" style="gap: 0.75rem;">
+                <div class="logo-badge" style="width: 44px; height: 44px; border-radius: 12px; padding: 8px; display: flex; align-items: center; justify-content: center;" aria-hidden="true">
+                    <span class="material-symbols-outlined text-white" style="font-size: 28px;">analytics</span>
+                </div>
+                <div>
+                    <h1 class="hero-heading font-display text-white" style="font-size: 1.25rem; line-height: 1.3; margin: 0;">Analytics Dashboard</h1>
+                    <p class="hero-subtext font-semibold" style="font-size: 0.75rem; margin-top: 0.125rem;">Installation Performance & Insights</p>
+                </div>
+            </div>
+            <div class="flex items-center" style="gap: 0.625rem;">
+                <div class="user-chip text-right hidden md:block" style="padding: 0.4rem 0.65rem;">
+                    <p class="text-white" style="font-size: 0.75rem; font-weight: 600; margin: 0;">Welcome, <span class="username-highlight font-bold">{{ session.username }}</span></p>
+                </div>
+                <button onclick="logout()" class="logout-btn text-white flex items-center text-white" style="padding: 0.4rem 0.7rem; gap: 0.4rem; font-size: 0.75rem; font-weight: 600;">
+                    <span class="material-symbols-outlined icon-sm">logout</span>
+                    <span>Logout</span>
+                </button>
+            </div>
+        </div>
+    </div>
+</header>
+
+<main class="container mx-auto max-w-7xl px-5 sm:px-6" style="padding-top: 1rem; padding-bottom: 1.7rem; overflow-x: clip;">
+    <!-- Control Panel -->
+    <div class="control-panel mb-6 animate-slide-in">
+        <div class="grid grid-cols-1 gap-3 lg:grid-cols-12 lg:gap-4">
+            <!-- Combined: View + Date Range in same row -->
+            <section class="panel-section lg:col-span-7" style="padding: 0.7rem;">
+                <div class="flex flex-col gap-3" style="flex-direction: row; gap: 1rem;">
+                    <!-- View Selection -->
+                    <div style="flex: 0 0 33.333%;">
+                        <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
+                            <span class="material-symbols-outlined icon-sm">visibility</span>
+                            View
+                        </h3>
+                        <div class="flex gap-1.5">
+                            <button onclick="switchView('fe')" id="view-fe" class="view-tab view-tab-active flex items-center gap-1.5 justify-center flex-1" style="padding: 0.5rem 0.6rem;">
+                                <span class="material-symbols-outlined icon-sm text-white">engineering</span>
+                                <span>Field</span>
+                            </button>
+                            <button onclick="switchView('noc')" id="view-noc" class="view-tab bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-1.5 justify-center flex-1" style="padding: 0.5rem 0.6rem;">
+                                <span class="material-symbols-outlined icon-sm text-gray-600">headset_mic</span>
+                                <span>NOC</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Date Range -->
+                    <div style="flex: 0 0 66.666%;">
+                        <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
+                            <span class="material-symbols-outlined icon-sm">calendar_today</span>
+                            Date Range
+                        </h3>
+                        <div class="grid grid-cols-3 gap-1.5">
+                            <button onclick="setDateRange('today')" id="range-today" class="date-btn date-btn-active flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                                <span class="material-symbols-outlined icon-xs">today</span>
+                                <span>Today</span>
+                            </button>
+                            <button onclick="setDateRange('yesterday')" id="range-yesterday" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                                <span class="material-symbols-outlined icon-xs">history</span>
+                                <span>Yesterday</span>
+                            </button>
+                            <button onclick="setDateRange('last7days')" id="range-last7days" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                                <span class="material-symbols-outlined icon-xs">date_range</span>
+                                <span>7 Days</span>
+                            </button>
+                            <button onclick="setDateRange('lastmonth')" id="range-lastmonth" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                                <span class="material-symbols-outlined icon-xs">calendar_month</span>
+                                <span>Month</span>
+                            </button>
+                            <button onclick="toggleCustomRange()" id="range-custom" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-1 justify-center col-span-2" style="padding: 0.45rem 0.5rem;">
+                                <span class="material-symbols-outlined icon-xs">event</span>
+                                <span>Custom Range</span>
+                            </button>
+                        </div>
+                        
+                        <!-- Custom Range Picker -->
+                        <div id="custom-range-picker" class="hidden">
+                            <div class="grid grid-cols-1 gap-2">
+                                <div>
+                                    <label class="mb-1 flex items-center gap-1">
+                                        <span class="material-symbols-outlined icon-xs">schedule</span>
+                                        From Date
+                                    </label>
+                                    <input type="datetime-local" id="date-from">
+                                </div>
+                                <div>
+                                    <label class="mb-1 flex items-center gap-1">
+                                        <span class="material-symbols-outlined icon-xs">schedule</span>
+                                        To Date
+                                    </label>
+                                    <input type="datetime-local" id="date-to">
+                                </div>
+                                <button onclick="applyCustomRange()" class="range-apply-btn flex items-center justify-center gap-1.5" style="padding: 0.45rem 0.6rem;">
+                                    <span class="material-symbols-outlined icon-xs">check_circle</span>
+                                    <span>Apply</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+            
+            <!-- Right: KPI Tiles (Horizontal in one row) -->
+            <section class="panel-section lg:col-span-5" style="padding: 0.7rem;">
+                <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
+                    <span class="material-symbols-outlined icon-sm">insights</span>
+                    Key Metrics
+                </h3>
+                <div class="flex gap-1.5">
+                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.1s; padding: 0.5rem 0.55rem; min-height: auto;">
+                        <div class="kpi-icon kpi-icon-blue" style="width: 1.8rem; height: 1.8rem;">
+                            <span class="material-symbols-outlined" style="font-size: 16px !important;">play_circle</span>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="kpi-label" style="font-size: 0.6rem;">Started</p>
+                            <p class="kpi-value text-blue-600" id="kpi-started" style="font-size: 0.95rem; margin-top: 0.1rem;">0</p>
+                        </div>
+                    </div>
+                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.2s; padding: 0.5rem 0.55rem; min-height: auto;">
+                        <div class="kpi-icon kpi-icon-green" style="width: 1.8rem; height: 1.8rem;">
+                            <span class="material-symbols-outlined" style="font-size: 16px !important;">check_circle</span>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="kpi-label" style="font-size: 0.6rem;">Completed</p>
+                            <p class="kpi-value text-green-600" id="kpi-completed" style="font-size: 0.95rem; margin-top: 0.1rem;">0</p>
+                        </div>
+                    </div>
+                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.3s; padding: 0.5rem 0.55rem; min-height: auto;">
+                        <div class="kpi-icon kpi-icon-orange" style="width: 1.8rem; height: 1.8rem;">
+                            <span class="material-symbols-outlined" style="font-size: 16px !important;">pending</span>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="kpi-label" style="font-size: 0.6rem;">In Progress</p>
+                            <p class="kpi-value text-orange-600" id="kpi-in-progress" style="font-size: 0.95rem; margin-top: 0.1rem;">0</p>
+                        </div>
+                    </div>
+                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.4s; padding: 0.5rem 0.55rem; min-height: auto;">
+                        <div class="kpi-icon kpi-icon-red" style="width: 1.8rem; height: 1.8rem; background: rgba(239, 68, 68, 0.15); color: #dc2626;">
+                            <span class="material-symbols-outlined" style="font-size: 16px !important;">inbox</span>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="kpi-label" style="font-size: 0.6rem;">Unassigned</p>
+                            <p class="kpi-value text-red-600" id="kpi-unassigned" style="font-size: 0.95rem; margin-top: 0.1rem;">0</p>
+                        </div>
+                    </div>
+                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.5s; padding: 0.5rem 0.55rem; min-height: auto;">
+                        <div class="kpi-icon kpi-icon-amber" style="width: 1.8rem; height: 1.8rem;">
+                            <span class="material-symbols-outlined" style="font-size: 16px !important;">schedule</span>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="kpi-label" style="font-size: 0.6rem;">Avg Time</p>
+                            <p class="kpi-value text-amber-600" id="kpi-avg-completion" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Breadcrumb Navigation -->
+    <div id="breadcrumb-container" class="mb-6 hidden animate-scale-in">
+        <div class="breadcrumb">
+            <span class="material-symbols-outlined icon-sm text-teal-400">home</span>
+            <span class="breadcrumb-item active" onclick="navigateToLevel(0)" id="breadcrumb-overview">Overview</span>
+            <span class="breadcrumb-separator hidden" id="breadcrumb-sep1">›</span>
+            <span class="breadcrumb-item hidden" onclick="navigateToLevel(1)" id="breadcrumb-day"></span>
+            <span class="breadcrumb-separator hidden" id="breadcrumb-sep2">›</span>
+            <span class="breadcrumb-item hidden" id="breadcrumb-user"></span>
+        </div>
+    </div>
+
+    <!-- Main Chart -->
+    <div class="chart-container mb-6 animate-fade-in" style="animation-delay: 0.5s;">
+        <div class="chart-toolbar mb-4">
+            <div class="chart-heading-wrap">
+                <button onclick="goBack()" id="back-button" class="back-btn hidden flex items-center gap-2">
+                    <span class="material-symbols-outlined icon-sm text-gray-600">arrow_back</span>
+                    <span>Back</span>
+                </button>
+                <h3 class="chart-title flex items-center gap-2" id="chart-title">
+                    <span class="material-symbols-outlined icon-lg text-teal-600">bar_chart</span>
+                    <span>Installations Overview</span>
+                </h3>
+            </div>
+            <div class="action-row">
+                <button onclick="resetZoom()" class="action-btn action-btn-blue flex items-center gap-2">
+                    <span class="material-symbols-outlined icon-sm text-blue-600">zoom_out_map</span>
+                    <span>Reset Zoom</span>
+                </button>
+                <button onclick="exportData()" class="action-btn action-btn-green flex items-center gap-2">
+                    <span class="material-symbols-outlined icon-sm text-green-600">download</span>
+                    <span>Export Data</span>
+                </button>
+            </div>
+        </div>
+        <div class="chart-canvas"><canvas id="main-chart"></canvas></div>
+    </div>
+
+    <!-- Trend Chart -->
+    <div class="chart-container animate-fade-in" style="animation-delay: 0.6s;">
+        <h3 class="chart-title mb-4 flex items-center gap-2">
+            <span class="material-symbols-outlined icon-lg text-cyan-600">trending_up</span>
+            <span>Performance Trend</span>
+        </h3>
+        <div class="chart-canvas"><canvas id="trend-chart"></canvas></div>
+    </div>
+
+    <!-- Operational KPIs Row -->
+    <div class="animate-fade-in mt-6" style="animation-delay: 0.7s;">
+        <div class="panel-section" style="padding: 0.7rem;">
+            <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
+                <span class="material-symbols-outlined icon-sm">monitoring</span>
+                Operational Metrics
+            </h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-1.5">
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">SIM1 Failures</p>
+                        <p class="kpi-value text-red-500" id="kpi-sim1-fails" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">SIM2 Failures</p>
+                        <p class="kpi-value text-red-400" id="kpi-sim2-fails" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP Failures</p>
+                        <p class="kpi-value text-orange-500" id="kpi-ztp-fails" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP by FE</p>
+                        <p class="kpi-value text-blue-500" id="kpi-ztp-fe" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP by NOC</p>
+                        <p class="kpi-value text-purple-500" id="kpi-ztp-noc" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">HSO Retries</p>
+                        <p class="kpi-value text-amber-500" id="kpi-hso-multi" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">Completion %</p>
+                        <p class="kpi-value text-green-500" id="kpi-completion-rate" style="font-size: 0.85rem; margin-top: 0.1rem;">0%</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stage Duration Averages (KPI cards) -->
+    <div class="animate-fade-in mt-4" style="animation-delay: 0.8s;">
+        <div class="panel-section" style="padding: 0.7rem;">
+            <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
+                <span class="material-symbols-outlined icon-sm">timer</span>
+                Average Stage Durations (minutes)
+            </h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-1.5">
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">Queue Wait</p>
+                        <p class="kpi-value text-indigo-600" id="kpi-avg-queue" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">SIM1 Activation</p>
+                        <p class="kpi-value text-blue-600" id="kpi-avg-sim1" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">SIM2 Activation</p>
+                        <p class="kpi-value text-cyan-600" id="kpi-avg-sim2" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP Config</p>
+                        <p class="kpi-value text-teal-600" id="kpi-avg-ztp-config" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP Execution</p>
+                        <p class="kpi-value text-green-600" id="kpi-avg-ztp-exec" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">NS Processing</p>
+                        <p class="kpi-value text-amber-600" id="kpi-avg-ns-proc" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
+                    <div class="min-w-0 text-center w-full">
+                        <p class="kpi-label" style="font-size: 0.55rem;">HSO Review</p>
+                        <p class="kpi-value text-red-600" id="kpi-avg-hso" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bottom Charts Row: Stage Durations + Status Distribution + ZTP + SIM -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 animate-fade-in" style="animation-delay: 0.9s;">
+        <!-- Stage Duration Bar Chart -->
+        <div class="chart-container">
+            <h3 class="chart-title mb-4 flex items-center gap-2">
+                <span class="material-symbols-outlined icon-lg text-indigo-600">stacked_bar_chart</span>
+                <span>Avg Stage Durations</span>
+            </h3>
+            <div class="chart-canvas" style="height: 280px;"><canvas id="stage-duration-chart"></canvas></div>
+        </div>
+
+        <!-- Status Distribution Doughnut -->
+        <div class="chart-container">
+            <h3 class="chart-title mb-4 flex items-center gap-2">
+                <span class="material-symbols-outlined icon-lg text-purple-600">donut_large</span>
+                <span>Status Distribution</span>
+            </h3>
+            <div class="chart-canvas" style="height: 280px;"><canvas id="status-dist-chart"></canvas></div>
+        </div>
+
+        <!-- ZTP Breakdown Pie Chart -->
+        <div class="chart-container">
+            <h3 class="chart-title mb-4 flex items-center gap-2">
+                <span class="material-symbols-outlined icon-lg text-teal-600">pie_chart</span>
+                <span>ZTP Breakdown (FE vs NOC)</span>
+            </h3>
+            <div class="chart-canvas" style="height: 280px;"><canvas id="ztp-breakdown-chart"></canvas></div>
+        </div>
+
+        <!-- SIM Performance Chart -->
+        <div class="chart-container">
+            <h3 class="chart-title mb-4 flex items-center gap-2">
+                <span class="material-symbols-outlined icon-lg text-blue-600">sim_card</span>
+                <span>SIM Activation Performance</span>
+            </h3>
+            <div class="chart-canvas" style="height: 280px;"><canvas id="sim-perf-chart"></canvas></div>
+        </div>
+    </div>
+</main>
+
+<script>
+let currentView = 'fe', currentRange = 'today', currentLevel = 0;
+let selectedDay = null, selectedUser = null, selectedUserId = null;
+let customDateFrom = null, customDateTo = null;
+let mainChart = null, trendChart = null, currentChartData = null;
+let stageDurationChart = null, statusDistChart = null, ztpBreakdownChart = null, simPerfChart = null;
+
+document.addEventListener('DOMContentLoaded', () => {
+    loadAnalytics();
+});
+
+function switchView(view) {
+    currentView = view; currentLevel = 0; selectedDay = null; selectedUser = null;
+    const feBtn = document.getElementById('view-fe'), nocBtn = document.getElementById('view-noc');
+    if (view === 'fe') {
+        feBtn.className = 'view-tab view-tab-active flex items-center gap-2 justify-center flex-1';
+        feBtn.innerHTML = '<span class="material-symbols-outlined icon-md text-white">engineering</span><span>Field</span>';
+        nocBtn.className = 'view-tab bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-2 justify-center flex-1';
+        nocBtn.innerHTML = '<span class="material-symbols-outlined icon-md text-gray-600">headset_mic</span><span>NOC</span>';
+    } else {
+        nocBtn.className = 'view-tab view-tab-active flex items-center gap-2 justify-center flex-1';
+        nocBtn.innerHTML = '<span class="material-symbols-outlined icon-md text-white">headset_mic</span><span>NOC</span>';
+        feBtn.className = 'view-tab bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-2 justify-center flex-1';
+        feBtn.innerHTML = '<span class="material-symbols-outlined icon-md text-gray-600">engineering</span><span>Field</span>';
+    }
+    document.getElementById('breadcrumb-container').classList.add('hidden');
+    loadAnalytics();
+}
+
+function setDateRange(range) {
+    currentRange = range;
+    const rangeButtons = {
+        'today': { icon: 'today', text: 'Today' },
+        'yesterday': { icon: 'history', text: 'Yesterday' },
+        'last7days': { icon: 'date_range', text: '7 Days' },
+        'lastmonth': { icon: 'calendar_month', text: 'Month' }
+    };
+    
+    ['today', 'yesterday', 'last7days', 'lastmonth'].forEach(r => {
+        const btn = document.getElementById(`range-${r}`);
+        const btnData = rangeButtons[r];
+        if (r === range) {
+            btn.className = 'date-btn date-btn-active flex items-center justify-center gap-1.5';
+            btn.innerHTML = `<span class="material-symbols-outlined icon-sm">${btnData.icon}</span><span>${btnData.text}</span>`;
+        } else {
+            btn.className = 'date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1.5';
+            btn.innerHTML = `<span class="material-symbols-outlined icon-sm">${btnData.icon}</span><span>${btnData.text}</span>`;
+        }
+    });
+    
+    const customBtn = document.getElementById('range-custom');
+    if (range === 'custom') {
+        customBtn.className = 'date-btn date-btn-active flex items-center gap-2 justify-center w-full mt-2';
+    } else {
+        customBtn.className = 'date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-2 justify-center w-full mt-2';
+    }
+    
+    if (range !== 'custom') { document.getElementById('custom-range-picker').classList.add('hidden'); loadAnalytics(); }
+}
+
+function toggleCustomRange() { document.getElementById('custom-range-picker').classList.toggle('hidden'); }
+
+function applyCustomRange() {
+    const fromInput = document.getElementById('date-from').value, toInput = document.getElementById('date-to').value;
+    if (!fromInput || !toInput) { showToast('Please select both dates', 'error'); return; }
+    customDateFrom = new Date(fromInput); customDateTo = new Date(toInput);
+    if (customDateFrom > customDateTo) { showToast('From date must be before To date', 'error'); return; }
+    currentRange = 'custom'; setDateRange('custom'); loadAnalytics(); showToast('Custom range applied', 'success');
+}
+
+async function loadAnalytics() {
+    showLoading();
+    try {
+        const params = new URLSearchParams({ range: currentRange, view: currentView });
+        if (currentRange === 'custom' && customDateFrom && customDateTo) {
+            params.append('from', customDateFrom.toISOString());
+            params.append('to', customDateTo.toISOString());
+        }
+        const kpiData = await (await fetch(`/api/analytics/kpi?${params}`)).json();
+        updateKPIs(kpiData);
+        
+        if (currentLevel === 0) await loadOverviewChart();
+        else if (currentLevel === 1) await loadDayDetailChart();
+        else if (currentLevel === 2) await loadUserDetailChart();
+        
+        await loadTrendChart();
+
+        // Load additional report charts
+        await Promise.all([
+            loadStageDurationChart(),
+            loadStatusDistChart(),
+            loadZTPBreakdownChart(),
+            loadSIMPerfChart(),
+        ]);
+    } catch (error) { console.error('Error:', error); showToast('Failed to load analytics', 'error'); }
+    hideLoading();
+}
+
+function updateKPIs(data) {
+    document.getElementById('kpi-started').textContent = data.total_started || 0;
+    document.getElementById('kpi-completed').textContent = data.total_completed || 0;
+    document.getElementById('kpi-avg-completion').textContent = data.avg_completion || '-';
+    document.getElementById('kpi-in-progress').textContent = data.in_progress || 0;
+    document.getElementById('kpi-unassigned').textContent = data.unassigned || 0;
+
+    // Operational metrics
+    const el = id => document.getElementById(id);
+    if (el('kpi-sim1-fails')) el('kpi-sim1-fails').textContent = data.sim1_failure_count ?? 0;
+    if (el('kpi-sim2-fails')) el('kpi-sim2-fails').textContent = data.sim2_failure_count ?? 0;
+    if (el('kpi-ztp-fails')) el('kpi-ztp-fails').textContent = data.ztp_failure_count ?? 0;
+    if (el('kpi-ztp-fe')) el('kpi-ztp-fe').textContent = data.ztp_by_fe ?? 0;
+    if (el('kpi-ztp-noc')) el('kpi-ztp-noc').textContent = data.ztp_by_ns ?? 0;
+    if (el('kpi-hso-multi')) el('kpi-hso-multi').textContent = data.hso_multi_attempt ?? 0;
+    if (el('kpi-completion-rate')) el('kpi-completion-rate').textContent = (data.completion_rate ?? 0) + '%';
+
+    // Stage duration averages
+    const fmt = v => v != null ? v + 'm' : '-';
+    if (el('kpi-avg-queue')) el('kpi-avg-queue').textContent = fmt(data.avg_queue_wait_min);
+    if (el('kpi-avg-sim1')) el('kpi-avg-sim1').textContent = fmt(data.avg_sim1_act_min);
+    if (el('kpi-avg-sim2')) el('kpi-avg-sim2').textContent = fmt(data.avg_sim2_act_min);
+    if (el('kpi-avg-ztp-config')) el('kpi-avg-ztp-config').textContent = fmt(data.avg_ztp_config_min);
+    if (el('kpi-avg-ztp-exec')) el('kpi-avg-ztp-exec').textContent = fmt(data.avg_ztp_exec_min);
+    if (el('kpi-avg-ns-proc')) el('kpi-avg-ns-proc').textContent = fmt(data.avg_ns_processing_min);
+    if (el('kpi-avg-hso')) el('kpi-avg-hso').textContent = fmt(data.avg_hso_review_min);
+}
+
+async function loadOverviewChart() {
+    const params = new URLSearchParams({ range: currentRange, view: currentView });
+    if (currentRange === 'custom' && customDateFrom && customDateTo) {
+        params.append('from', customDateFrom.toISOString());
+        params.append('to', customDateTo.toISOString());
+    }
+    const data = await (await fetch(`/api/analytics/${currentView}/overview?${params}`)).json();
+    currentChartData = data;
+    renderOverviewChart(data);
+}
+
+async function loadDayDetailChart() {
+    if (!selectedDay) return;
+    if (currentView === 'fe') {
+        const data = await (await fetch(`/api/analytics/fe/day/${selectedDay}`)).json();
+        renderTimelineChart(data);
+    } else {
+        const data = await (await fetch(`/api/analytics/noc/day/${selectedDay}`)).json();
+        currentChartData = data;
+        renderNOCDayChart(data);
+    }
+}
+
+async function loadUserDetailChart() {
+    if (!selectedDay || !selectedUserId) return;
+    const data = await (await fetch(`/api/analytics/noc/user/${selectedUserId}/day/${selectedDay}`)).json();
+    renderTimelineChart(data);
+}
+
+async function loadTrendChart() {
+    const params = new URLSearchParams({ range: currentRange });
+    if (currentRange === 'custom' && customDateFrom && customDateTo) {
+        params.append('from', customDateFrom.toISOString());
+        params.append('to', customDateTo.toISOString());
+    }
+    const data = await (await fetch(`/api/analytics/trend?${params}`)).json();
+    renderTrendChart(data);
+}
+
+function renderOverviewChart(data) {
+    const ctx = document.getElementById('main-chart').getContext('2d');
+    if (mainChart) mainChart.destroy();
+    
+    mainChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: data.labels, datasets: data.datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            onClick: (event, elements) => {
+                if (elements.length > 0) {
+                    const index = elements[0].index;
+                    const day = data.labels[index];
+                    drillDownToDay(day);
+                }
+            },
+            plugins: {
+                legend: { 
+                    position: 'top',
+                    labels: { 
+                        padding: 10, 
+                        font: { size: 10, weight: '600' }, 
+                        usePointStyle: true, 
+                        pointStyle: 'circle',
+                        generateLabels: function(chart) {
+                            const datasets = chart.data.datasets;
+                            const labels = [];
+                            const seen = new Set();
+                            
+                            // Extract unique account names from datasets
+                            datasets.forEach((dataset, i) => {
+                                if (dataset.label.includes('Completed')) {
+                                    const account = dataset.label.split(' - ')[0];
+                                    if (!seen.has(account)) {
+                                        seen.add(account);
+                                        labels.push({
+                                            text: account,
+                                            fillStyle: dataset.backgroundColor,
+                                            strokeStyle: dataset.borderColor,
+                                            lineWidth: dataset.borderWidth,
+                                            hidden: false,
+                                            index: i,
+                                            datasetIndex: i
+                                        });
+                                    }
+                                }
+                            });
+                            return labels;
+                        }
+                    }
+                },
+                tooltip: { 
+                    mode: 'index', 
+                    intersect: false, 
+                    backgroundColor: 'rgba(0, 0, 0, 0.85)', 
+                    padding: 8, 
+                    titleFont: { size: 11, weight: 'bold' }, 
+                    bodyFont: { size: 10 }, 
+                    borderColor: 'rgba(255, 255, 255, 0.1)', 
+                    borderWidth: 1,
+                    filter: function(tooltipItem) {
+                        // Only show Completed datasets in tooltip
+                        return tooltipItem.dataset.label.includes('Completed');
+                    },
+                    callbacks: {
+                        label: function(context) {
+                            const datasetLabel = context.dataset.label;
+                            
+                            // Extract account name
+                            const account = datasetLabel.split(' - ')[0];
+                            const dataIndex = context.dataIndex;
+                            const datasets = context.chart.data.datasets;
+                            
+                            // Find completed and in progress values for this account
+                            let completed = 0;
+                            let inProgress = 0;
+                            
+                            datasets.forEach(ds => {
+                                if (ds.label.startsWith(account)) {
+                                    if (ds.label.includes('Completed')) {
+                                        completed = ds.data[dataIndex] || 0;
+                                    } else if (ds.label.includes('In Progress')) {
+                                        inProgress = ds.data[dataIndex] || 0;
+                                    }
+                                }
+                            });
+                            
+                            const total = completed + inProgress;
+                            return `${account} (${completed}/${total})`;
+                        }
+                    }
+                },
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'xy'
+                    },
+                    zoom: {
+                        wheel: {
+                            enabled: true,
+                            speed: 0.1
+                        },
+                        pinch: {
+                            enabled: true
+                        },
+                        mode: 'xy'
+                    },
+                    limits: {
+                        x: { min: 'original', max: 'original' },
+                        y: { min: 0, max: 'original' }
+                    }
+                }
+            },
+            scales: {
+                x: { 
+                    stacked: true,
+                    grid: { display: false }, 
+                    ticks: { font: { size: 11, weight: '500' } } 
+                },
+                y: { 
+                    stacked: true,
+                    beginAtZero: true, 
+                    ticks: { stepSize: 1, font: { size: 11, weight: '500' } }, 
+                    grid: { color: 'rgba(0, 0, 0, 0.05)' } 
+                }
+            },
+            barPercentage: 0.4,
+            categoryPercentage: 0.5
+        }
+    });
+}
+
+function renderNOCDayChart(data) {
+    const ctx = document.getElementById('main-chart').getContext('2d');
+    if (mainChart) mainChart.destroy();
+    
+    mainChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: data.labels, datasets: data.datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            onClick: (event, elements) => {
+                if (elements.length > 0) {
+                    const index = elements[0].index;
+                    const userId = data.noc_ids[index];
+                    const userName = data.labels[index];
+                    if (userId) drillDownToUser(userId, userName);
+                }
+            },
+            plugins: {
+                legend: { position: 'top', labels: { padding: 15, font: { size: 12, weight: '600' }, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: { mode: 'index', intersect: false, backgroundColor: 'rgba(0, 0, 0, 0.8)', padding: 12, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 13 }, borderColor: 'rgba(255, 255, 255, 0.1)', borderWidth: 1 },
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'xy'
+                    },
+                    zoom: {
+                        wheel: {
+                            enabled: true,
+                            speed: 0.1
+                        },
+                        pinch: {
+                            enabled: true
+                        },
+                        mode: 'xy'
+                    },
+                    limits: {
+                        x: { min: 'original', max: 'original' },
+                        y: { min: 0, max: 'original' }
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { font: { size: 11, weight: '500' } } },
+                y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 11, weight: '500' } }, grid: { color: 'rgba(0, 0, 0, 0.05)' } }
+            },
+            barPercentage: 0.4,
+            categoryPercentage: 0.5
+        }
+    });
+}
+
+function renderTimelineChart(data) {
+    const ctx = document.getElementById('main-chart').getContext('2d');
+    if (mainChart) mainChart.destroy();
+    
+    // Create datasets - one per tracker
+    const datasets = data.trackers.map((tracker, idx) => {
+        const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
+        const color = colors[idx % colors.length];
+        
+        // Create points for each event
+        const points = tracker.events.map(event => {
+            const stageValue = getStageValue(event.stage);
+            return {
+                x: new Date(event.timestamp),
+                y: stageValue,
+                stage: event.stage,
+                remarks: event.remarks
+            };
+        });
+        
+        return {
+            label: `${tracker.sdwan_id}`,
+            data: points,
+            borderColor: color,
+            backgroundColor: color,
+            showLine: true,
+            tension: 0.1,
+            pointRadius: 6,
+            pointHoverRadius: 8,
+            borderWidth: 2,
+            fill: false
+        };
+    });
+    
+    mainChart = new Chart(ctx, {
+        type: 'scatter',
+        data: { datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: {
+                        padding: 10,
+                        font: { size: 10, weight: '600' },
+                        usePointStyle: true,
+                        pointStyle: 'circle',
+                        boxWidth: 8,
+                        boxHeight: 8
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+                    padding: 12,
+                    titleFont: { size: 13, weight: 'bold' },
+                    bodyFont: { size: 12 },
+                    borderColor: 'rgba(255, 255, 255, 0.2)',
+                    borderWidth: 1,
+                    callbacks: {
+                        title: (items) => {
+                            const datasetIndex = items[0].datasetIndex;
+                            const tracker = data.trackers[datasetIndex];
+                            return `${tracker.sdwan_id} - ${tracker.customer}`;
+                        },
+                        label: (context) => {
+                            const point = context.raw;
+                            const datasetIndex = context.datasetIndex;
+                            const tracker = data.trackers[datasetIndex];
+                            const time = new Date(point.x).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+                            return [
+                                `Stage: ${formatStage(point.stage)}`,
+                                `Time: ${time}`,
+                                `FE: ${tracker.fe_name || 'N/A'}`,
+                                `NOC: ${tracker.noc_assignee || 'Unassigned'}`,
+                                `Status: ${formatStatus(tracker.status)}`
+                            ];
+                        }
+                    }
+                },
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'xy'
+                    },
+                    zoom: {
+                        wheel: {
+                            enabled: true,
+                            speed: 0.1
+                        },
+                        pinch: {
+                            enabled: true
+                        },
+                        mode: 'xy'
+                    },
+                    limits: {
+                        x: { min: 'original', max: 'original' },
+                        y: { min: 0, max: 7 }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    type: 'time',
+                    time: {
+                        unit: 'hour',
+                        displayFormats: { hour: 'HH:mm' },
+                        tooltipFormat: 'HH:mm'
+                    },
+                    title: {
+                        display: true,
+                        text: 'Time of Day',
+                        font: { size: 13, weight: 'bold' },
+                        padding: { top: 10 }
+                    },
+                    grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                    ticks: { font: { size: 11 } }
+                },
+                y: {
+                    position: 'left',
+                    min: 0,
+                    max: 7,
+                    ticks: {
+                        stepSize: 1,
+                        callback: function(value) {
+                            if (value === 0) return 'Created';
+                            if (value === 1) return 'NOC Assigned';
+                            if (value === 2) return 'SIM1 Active';
+                            if (value === 3) return 'SIM2 Active';
+                            if (value === 4) return 'ZTP Done';
+                            if (value === 5) return 'Ready';
+                            if (value === 6) return 'Complete';
+                            return '';
+                        },
+                        font: { size: 11, weight: '500' },
+                        autoSkip: false
+                    },
+                    title: {
+                        display: true,
+                        text: 'Installation Stage',
+                        font: { size: 13, weight: 'bold' },
+                        padding: { bottom: 10 }
+                    },
+                    grid: { 
+                        color: 'rgba(0, 0, 0, 0.08)',
+                        borderDash: [5, 5]
+                    }
+                }
+            }
+        }
+    });
+}
+
+function formatStatus(status) {
+    const statusMap = {
+        'waiting_noc_assignment': 'Waiting NOC',
+        'noc_working': 'NOC Working',
+        'ready_for_coordination': 'Ready',
+        'installation_complete': 'Complete'
+    };
+    return statusMap[status] || status;
+}
+
+function getStageValue(stage) {
+    const stageMap = {
+        'tracker_created': 0,
+        'noc_assigned': 1,
+        'sim1_activation_complete_manual': 2,
+        'sim1_activation_complete_preactivated': 2,
+        'sim2_activation_complete_manual': 3,
+        'sim2_activation_complete_preactivated': 3,
+        'ztp_completed': 4,
+        'ready_for_coordination': 5,
+        'hso_approved': 6,
+        'fe_left_site': 6,  // Same as complete
+        'installation_complete': 6
+    };
+    return stageMap[stage] || 0;
+}
+
+function formatStage(stage) {
+    const stageNames = {
+        'tracker_created': 'Tracker Created',
+        'noc_assigned': 'NOC Assigned',
+        'sim1_activation_complete_manual': 'SIM1 Activated',
+        'sim1_activation_complete_preactivated': 'SIM1 Pre-activated',
+        'sim2_activation_complete_manual': 'SIM2 Activated',
+        'sim2_activation_complete_preactivated': 'SIM2 Pre-activated',
+        'ztp_completed': 'ZTP Completed',
+        'ready_for_coordination': 'Ready for Coordination',
+        'hso_approved': 'HSO Approved',
+        'installation_complete': 'Installation Complete'
+    };
+    return stageNames[stage] || stage;
+}
+
+function renderTrendChart(data) {
+    const ctx = document.getElementById('trend-chart').getContext('2d');
+    if (trendChart) trendChart.destroy();
+    
+    trendChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: data.labels, datasets: data.datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { position: 'top', labels: { padding: 15, font: { size: 12, weight: '600' }, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: { mode: 'index', intersect: false, backgroundColor: 'rgba(0, 0, 0, 0.8)', padding: 12, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 13 }, borderColor: 'rgba(255, 255, 255, 0.1)', borderWidth: 1 },
+                zoom: {
+                    pan: {
+                        enabled: true,
+                        mode: 'xy'
+                    },
+                    zoom: {
+                        wheel: {
+                            enabled: true,
+                            speed: 0.1
+                        },
+                        pinch: {
+                            enabled: true
+                        },
+                        mode: 'xy'
+                    },
+                    limits: {
+                        x: { min: 'original', max: 'original' },
+                        y: { min: 0, max: 'original' }
+                    }
+                }
+            },
+            scales: {
+                x: { grid: { display: false }, ticks: { font: { size: 11, weight: '500' } } },
+                y: { type: 'linear', display: true, position: 'left', beginAtZero: true, title: { display: true, text: 'Count', font: { size: 12, weight: 'bold' } }, ticks: { stepSize: 1, font: { size: 11, weight: '500' } }, grid: { color: 'rgba(0, 0, 0, 0.05)' } },
+                y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, title: { display: true, text: 'Hours', font: { size: 12, weight: 'bold' } }, ticks: { font: { size: 11, weight: '500' } }, grid: { drawOnChartArea: false } }
+            },
+            barPercentage: 0.4,
+            categoryPercentage: 0.5
+        }
+    });
+}
+
+function drillDownToDay(day) {
+    selectedDay = day;
+    currentLevel = 1;
+    document.getElementById('back-button').classList.remove('hidden');
+    updateBreadcrumb();
+    loadAnalytics();
+}
+
+function drillDownToUser(userId, userName) {
+    selectedUserId = userId;
+    selectedUser = userName;
+    currentLevel = 2;
+    document.getElementById('back-button').classList.remove('hidden');
+    updateBreadcrumb();
+    loadAnalytics();
+}
+
+function navigateToLevel(level) {
+    currentLevel = level;
+    if (level === 0) {
+        selectedDay = null; selectedUser = null; selectedUserId = null;
+        document.getElementById('breadcrumb-container').classList.add('hidden');
+        document.getElementById('back-button').classList.add('hidden');
+    } else if (level === 1) {
+        selectedUser = null; selectedUserId = null;
+        document.getElementById('back-button').classList.remove('hidden');
+    }
+    loadAnalytics();
+}
+
+// ─── New Report Charts ──────────────────────────────────────────────────────
+
+function getAnalyticsParams() {
+    const params = new URLSearchParams({ range: currentRange });
+    if (currentRange === 'custom' && customDateFrom && customDateTo) {
+        params.append('from', customDateFrom.toISOString());
+        params.append('to', customDateTo.toISOString());
+    }
+    return params;
+}
+
+async function loadStageDurationChart() {
+    try {
+        const data = await (await fetch(`/api/analytics/stage-durations?${getAnalyticsParams()}`)).json();
+        const ctx = document.getElementById('stage-duration-chart');
+        if (!ctx) return;
+        if (stageDurationChart) stageDurationChart.destroy();
+        stageDurationChart = new Chart(ctx.getContext('2d'), {
+            type: 'bar',
+            data: { labels: data.labels, datasets: data.datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                indexAxis: 'y',
+                plugins: { legend: { display: false },
+                    tooltip: { callbacks: { label: c => c.raw + ' min' } }
+                },
+                scales: { x: { title: { display: true, text: 'Minutes' }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                         y: { grid: { display: false } } }
+            }
+        });
+    } catch (e) { console.error('Stage duration chart error:', e); }
+}
+
+async function loadStatusDistChart() {
+    try {
+        const data = await (await fetch('/api/analytics/status-distribution')).json();
+        const ctx = document.getElementById('status-dist-chart');
+        if (!ctx) return;
+        if (statusDistChart) statusDistChart.destroy();
+        statusDistChart = new Chart(ctx.getContext('2d'), {
+            type: 'doughnut',
+            data: { labels: data.labels, datasets: data.datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
+                    tooltip: { callbacks: { label: c => c.label + ': ' + c.raw } }
+                }
+            }
+        });
+    } catch (e) { console.error('Status dist chart error:', e); }
+}
+
+async function loadZTPBreakdownChart() {
+    try {
+        const data = await (await fetch(`/api/analytics/ztp-breakdown?${getAnalyticsParams()}`)).json();
+        const ctx = document.getElementById('ztp-breakdown-chart');
+        if (!ctx) return;
+        if (ztpBreakdownChart) ztpBreakdownChart.destroy();
+        ztpBreakdownChart = new Chart(ctx.getContext('2d'), {
+            type: 'pie',
+            data: { labels: data.labels, datasets: data.datasets },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+                    tooltip: { callbacks: { label: c => c.label + ': ' + c.raw } }
+                }
+            }
+        });
+    } catch (e) { console.error('ZTP breakdown chart error:', e); }
+}
+
+async function loadSIMPerfChart() {
+    try {
+        const data = await (await fetch(`/api/analytics/sim-performance?${getAnalyticsParams()}`)).json();
+        const ctx = document.getElementById('sim-perf-chart');
+        if (!ctx) return;
+        if (simPerfChart) simPerfChart.destroy();
+        // Grouped bar chart: SIM1 vs SIM2 (success, failed, pending)
+        simPerfChart = new Chart(ctx.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: ['Success', 'Failed', 'Pending'],
+                datasets: [
+                    { label: 'SIM1', data: [data.sim1.success, data.sim1.failed, data.sim1.pending],
+                      backgroundColor: ['#22C55E', '#EF4444', '#D1D5DB'] },
+                    { label: 'SIM2', data: [data.sim2.success, data.sim2.failed, data.sim2.pending],
+                      backgroundColor: ['#10B981', '#F97316', '#E5E7EB'] },
+                ]
+            },
+            options: {
+                responsive: true, maintainAspectRatio: false,
+                plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } },
+                scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } },
+                         x: { grid: { display: false } } }
+            }
+        });
+    } catch (e) { console.error('SIM perf chart error:', e); }
+}
+
+function goBack() {
+    if (currentLevel === 2) {
+        navigateToLevel(1);
+    } else if (currentLevel === 1) {
+        navigateToLevel(0);
+    }
+}
+
+function resetZoom() {
+    if (mainChart) {
+        mainChart.resetZoom();
+    }
+    if (trendChart) {
+        trendChart.resetZoom();
+    }
+}
+
+function updateBreadcrumb() {
+    const container = document.getElementById('breadcrumb-container');
+    const dayElem = document.getElementById('breadcrumb-day');
+    const userElem = document.getElementById('breadcrumb-user');
+    const sep1 = document.getElementById('breadcrumb-sep1');
+    const sep2 = document.getElementById('breadcrumb-sep2');
+    
+    container.classList.remove('hidden');
+    
+    if (currentLevel >= 1 && selectedDay) {
+        sep1.classList.remove('hidden');
+        dayElem.classList.remove('hidden');
+        dayElem.textContent = selectedDay;
+        dayElem.classList.toggle('active', currentLevel === 1);
+    } else {
+        sep1.classList.add('hidden');
+        dayElem.classList.add('hidden');
+    }
+    
+    if (currentLevel >= 2 && selectedUser) {
+        sep2.classList.remove('hidden');
+        userElem.classList.remove('hidden');
+        userElem.textContent = selectedUser;
+        userElem.classList.add('active');
+    } else {
+        sep2.classList.add('hidden');
+        userElem.classList.add('hidden');
+    }
+    
+    document.getElementById('breadcrumb-overview').classList.toggle('active', currentLevel === 0);
+}
+
+async function exportData() {
+    showLoading();
+    try {
+        const params = new URLSearchParams({ range: currentRange, view: currentView });
+        if (currentRange === 'custom' && customDateFrom && customDateTo) {
+            params.append('from', customDateFrom.toISOString());
+            params.append('to', customDateTo.toISOString());
+        }
+        const response = await fetch(`/api/analytics/export/${currentView}?${params}`);
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `analytics_${currentView}_${currentRange}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        showToast('Data exported successfully', 'success');
+    } catch (error) { console.error('Export error:', error); showToast('Failed to export data', 'error'); }
+    hideLoading();
+}
+
+async function logout() {
+    if (confirm('Are you sure you want to logout?')) {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        window.location.href = '/login';
+    }
+}
+</script>
+{% endblock %}

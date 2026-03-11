@@ -28,41 +28,6 @@ db.chat_messages.create_index([('tracker_id', 1), ('timestamp', 1)])
 
 print("Indexes created successfully")
 
-# Insert sample NOC users
-noc_users = [
-    {
-        'username': 'noc_admin',
-        'password': 'noc123',  # In production, use hashed passwords
-        'name': 'NOC Admin',
-        'email': 'noc.admin@example.com',
-        'active': True,
-        'created_at': datetime.now(timezone.utc)
-    },
-    {
-        'username': 'noc_engineer1',
-        'password': 'noc123',
-        'name': 'John Doe',
-        'email': 'john.doe@example.com',
-        'active': True,
-        'created_at': datetime.now(timezone.utc)
-    },
-    {
-        'username': 'noc_engineer2',
-        'password': 'noc123',
-        'name': 'Jane Smith',
-        'email': 'jane.smith@example.com',
-        'active': True,
-        'created_at': datetime.now(timezone.utc)
-    }
-]
-
-for user in noc_users:
-    try:
-        db.noc_users.insert_one(user)
-        print(f"Created NOC user: {user['username']}")
-    except:
-        print(f"NOC user already exists: {user['username']}")
-
 # Insert predefined reasons
 predefined_reasons = [
     {
@@ -122,6 +87,3 @@ for reason_set in predefined_reasons:
     print(f"Created/Updated predefined reasons for: {reason_set['category']}")
 
 print("\nDatabase initialization completed successfully!")
-print("\nDemo Credentials:")
-print("FE: fe_user / fe123")
-print("NOC: noc_admin / noc123")

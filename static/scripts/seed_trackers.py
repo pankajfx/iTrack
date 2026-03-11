@@ -25,6 +25,8 @@ from bson import ObjectId
 random.seed()  # fresh seed each run so spread varies
 
 MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/sdwan_tracker')
+#prod
+# MONGO_URI  = os.environ.get('MONGO_URI', 'mongodb://myAdminUser:MyStrongPassword123@localhost:27017/sdwan_tracker?authSource=admin')
 client = MongoClient(MONGO_URI)
 db = client.get_default_database()
 

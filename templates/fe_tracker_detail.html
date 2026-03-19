@@ -56,6 +56,31 @@
 
     <div id="content-container" class="hidden">
 
+        <!-- ── Site Verification Status Banner ───────────────────────────── -->
+        <div id="sv-pending-banner" class="hidden mb-3 bg-amber-50 border border-amber-300 rounded-2xl p-4 flex items-start gap-3">
+            <span class="material-symbols-outlined text-amber-500 text-2xl flex-shrink-0 mt-0.5 pulse-ring">schedule</span>
+            <div>
+                <p class="text-sm font-bold text-amber-800">Site Verification Pending</p>
+                <p class="text-xs text-amber-700 mt-0.5">Your site photos have been submitted and are awaiting NOC review. The tracker will be assigned once your presence is confirmed.</p>
+            </div>
+        </div>
+
+        <div id="sv-rejected-banner" class="hidden mb-3 bg-red-50 border border-red-300 rounded-2xl p-4">
+            <div class="flex items-start gap-3 mb-3">
+                <span class="material-symbols-outlined text-red-500 text-2xl flex-shrink-0 mt-0.5">location_off</span>
+                <div class="flex-1">
+                    <p class="text-sm font-bold text-red-800">Site Verification Rejected</p>
+                    <p class="text-xs text-red-600 mt-0.5" id="sv-fe-rejection-reason">NOC could not confirm you were at site.</p>
+                    <p class="text-xs text-red-500 mt-1">Please go to the site, retake all 3 photos, and resubmit.</p>
+                </div>
+            </div>
+            <button onclick="startSVResubmit()" id="sv-resubmit-btn"
+                class="w-full py-3 bg-red-600 text-white font-bold rounded-xl hover:bg-red-700 active:scale-95 transition-all flex items-center justify-center gap-2 text-sm">
+                <span class="material-symbols-outlined">photo_camera</span>
+                Retake Site Photos &amp; Resubmit
+            </button>
+        </div>
+
         <!-- ── Row 1: Status + Info + NOC Contact ─────────────────────────── -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
 
@@ -455,6 +480,7 @@ function renderAll() {
     document.getElementById('content-container').classList.remove('hidden');
 
     renderHeader();
+    renderSiteVerificationBanner();
     renderStatusCard();
     renderInfoCard();
     renderNocContact();
@@ -1003,8 +1029,238 @@ window.onSocketReady(function() {
     }
 });
 
+// ─── Site Verification Banner ────────────────────────────────────────────────
+function renderSiteVerificationBanner() {
+    const sv = trackerData.site_verification;
+    const pending  = document.getElementById('sv-pending-banner');
+    const rejected = document.getElementById('sv-rejected-banner');
+    if (!sv || sv.status === 'confirmed') {
+        pending.classList.add('hidden');
+        rejected.classList.add('hidden');
+        return;
+    }
+    if (sv.status === 'rejected') {
+        pending.classList.add('hidden');
+        rejected.classList.remove('hidden');
+        const reasonEl = document.getElementById('sv-fe-rejection-reason');
+        const count    = sv.rejection_count || 1;
+        reasonEl.textContent = sv.rejection_reason
+            ? `Rejected (attempt ${count}): ${sv.rejection_reason}`
+            : 'NOC could not confirm you were at site.';
+        // Only allow resubmit if canInteract
+        document.getElementById('sv-resubmit-btn').style.display = canInteract ? '' : 'none';
+    } else {
+        // pending
+        pending.classList.remove('hidden');
+        rejected.classList.add('hidden');
+    }
+}
+
+// ─── Site Verification Resubmit Flow ─────────────────────────────────────────
+let svStream = null;
+let svCurrentSlot = null;
+const svPhotos = { 1: null, 2: null, 3: null };
+const svTypes  = { 1: 'booster', 2: 'router', 3: 'other' };
+let svGpsPosition = null;
+let svGpsAddress  = null;
+
+function startSVResubmit() {
+    // Reset photos
+    for (let i = 1; i <= 3; i++) { svPhotos[i] = null; }
+    updateSVModal();
+    document.getElementById('sv-resubmit-modal').classList.remove('hidden');
+    acquireSVGPS();
+}
+
+function acquireSVGPS() {
+    const statusEl = document.getElementById('sv-modal-gps');
+    statusEl.textContent = 'Acquiring GPS…';
+    statusEl.className = 'text-xs text-blue-600 mt-1';
+    if (!navigator.geolocation) { statusEl.textContent = 'GPS not supported'; return; }
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+        svGpsPosition = pos.coords;
+        statusEl.textContent = `GPS: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`;
+        statusEl.className = 'text-xs text-green-600 mt-1';
+        try {
+            const r = await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&format=json`, { headers: { 'Accept-Language': 'en' } });
+            const g = await r.json();
+            svGpsAddress = g.display_name || null;
+            if (svGpsAddress) statusEl.textContent += ' — Address acquired';
+        } catch (_) {}
+    }, () => {
+        statusEl.textContent = 'GPS unavailable — photos will have no location stamp';
+        statusEl.className = 'text-xs text-red-500 mt-1';
+    }, { enableHighAccuracy: true, timeout: 15000 });
+}
+
+function updateSVModal() {
+    const count = Object.values(svPhotos).filter(Boolean).length;
+    document.getElementById('sv-modal-count').textContent = `${count} of 3 photos captured`;
+    document.getElementById('sv-submit-btn').disabled = count < 3;
+    for (let i = 1; i <= 3; i++) {
+        const thumb = document.getElementById(`sv-thumb-${i}`);
+        const btnEl = document.getElementById(`sv-capture-btn-${i}`);
+        if (svPhotos[i]) {
+            thumb.innerHTML = `<img src="${svPhotos[i].data}" class="w-full h-full object-cover rounded-xl">
+                <div class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white text-center py-0.5 rounded-b-xl" style="font-size:10px;">${svTypes[i]}</div>
+                <button onclick="event.stopPropagation();svPhotos[${i}]=null;updateSVModal()" class="absolute top-1 right-1 h-5 w-5 bg-red-500 rounded-full text-white flex items-center justify-center" style="font-size:9px;"><span class="material-symbols-outlined" style="font-size:12px;">close</span></button>`;
+            thumb.className = 'relative rounded-xl overflow-hidden bg-gray-100 cursor-pointer';
+            thumb.style = 'aspect-ratio:4/3';
+            btnEl.classList.add('hidden');
+        } else {
+            thumb.innerHTML = '';
+            thumb.className = '';
+            thumb.style = '';
+            btnEl.classList.remove('hidden');
+        }
+    }
+}
+
+function svOpenCamera(slot) {
+    svCurrentSlot = slot;
+    const labels = { 1: 'Booster', 2: 'SDWAN Router', 3: 'Site Photo' };
+    document.getElementById('sv-camera-title').textContent = `Capture ${labels[slot]} Photo`;
+    document.getElementById('sv-camera-modal').classList.remove('hidden');
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(s => { svStream = s; document.getElementById('sv-camera-video').srcObject = s; })
+        .catch(() => { showToast('Camera access denied', 'error'); svCloseCamera(); });
+}
+
+function svCloseCamera() {
+    document.getElementById('sv-camera-modal').classList.add('hidden');
+    if (svStream) { svStream.getTracks().forEach(t => t.stop()); svStream = null; }
+}
+
+function svTakePicture() {
+    const video  = document.getElementById('sv-camera-video');
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0);
+    // GPS watermark
+    const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
+    const lines = svGpsPosition
+        ? [`Lat: ${svGpsPosition.latitude.toFixed(6)}  Lng: ${svGpsPosition.longitude.toFixed(6)}`, svGpsAddress ? svGpsAddress.substring(0, 60) : 'Address unavailable', now]
+        : ['GPS LOCATION NOT AVAILABLE', now];
+    const fs = Math.max(12, Math.floor(canvas.height * 0.022));
+    ctx.font = `bold ${fs}px monospace`;
+    const pad = Math.floor(fs * 0.6), lh = Math.floor(fs * 1.5);
+    const bw = Math.max(...lines.map(l => ctx.measureText(l).width)) + pad * 2;
+    const bh = lines.length * lh + pad * 2;
+    const by = canvas.height - bh - 2;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(2, by, bw, bh);
+    ctx.fillStyle = svGpsPosition ? '#00FF88' : '#FF6666';
+    lines.forEach((line, i) => ctx.fillText(line, 2 + pad, by + pad + (i + 1) * lh - Math.floor(lh * 0.2)));
+
+    const imageData = canvas.toDataURL('image/jpeg', 0.85);
+    const gpsSnap = svGpsPosition ? { lat: svGpsPosition.latitude, lng: svGpsPosition.longitude, address: svGpsAddress || null } : null;
+    svPhotos[svCurrentSlot] = { type: svTypes[svCurrentSlot], data: imageData, gps: gpsSnap, captured_at: new Date().toISOString() };
+    svCloseCamera();
+    updateSVModal();
+    showToast(`Photo ${svCurrentSlot} captured`, 'success');
+}
+
+async function submitSVResubmit() {
+    const images = Object.values(svPhotos).filter(Boolean);
+    if (images.length < 3) { showToast('Capture all 3 photos first', 'warning'); return; }
+    document.getElementById('sv-submit-btn').disabled = true;
+    try {
+        const res = await fetch(`/api/trackers/${trackerId}/site-verify/resubmit`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ site_images: images })
+        });
+        const d = await res.json();
+        if (d.success) {
+            document.getElementById('sv-resubmit-modal').classList.add('hidden');
+            showToast('Site photos resubmitted — awaiting NOC review', 'success');
+            loadTracker();
+        } else {
+            showToast(d.error || 'Resubmit failed', 'error');
+            document.getElementById('sv-submit-btn').disabled = false;
+        }
+    } catch {
+        showToast('Network error', 'error');
+        document.getElementById('sv-submit-btn').disabled = false;
+    }
+}
+
 // ─── Init ───────────────────────────────────────────────────────────────────
 loadTracker();
 setInterval(loadTracker, 30000);  // Auto-refresh every 30s for FE (less aggressive)
 </script>
+
+<!-- Site Verification Resubmit Modal -->
+<div id="sv-resubmit-modal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-50 flex flex-col overflow-y-auto">
+    <div class="bg-white min-h-screen flex flex-col">
+        <!-- Modal Header -->
+        <div class="bg-gradient-to-r from-red-600 to-rose-600 text-white px-4 py-4 flex items-center gap-3 safe-top sticky top-0 z-10">
+            <button onclick="document.getElementById('sv-resubmit-modal').classList.add('hidden')"
+                class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+            <div>
+                <h2 class="font-bold text-base">Retake Site Photos</h2>
+                <p class="text-xs text-red-100">Capture all 3 GPS-stamped photos to resubmit</p>
+            </div>
+        </div>
+        <div class="flex-1 px-4 py-4 space-y-3">
+            <!-- GPS status -->
+            <p id="sv-modal-gps" class="text-xs text-blue-600">Acquiring GPS…</p>
+            <!-- Photo 1 -->
+            <div class="bg-white rounded-2xl border border-gray-200 p-4">
+                <p class="text-sm font-bold text-gray-700 mb-2"><span class="material-symbols-outlined text-teal-600 align-middle mr-1">cell_tower</span>Photo 1: Booster / Antenna</p>
+                <div id="sv-thumb-1" class="mb-2"></div>
+                <button id="sv-capture-btn-1" onclick="svOpenCamera(1)" class="w-full py-3 border-2 border-dashed border-teal-300 text-teal-600 rounded-xl flex items-center justify-center gap-2 hover:bg-teal-50 active:scale-95 transition-all text-sm font-semibold">
+                    <span class="material-symbols-outlined">photo_camera</span>Capture Booster Photo
+                </button>
+            </div>
+            <!-- Photo 2 -->
+            <div class="bg-white rounded-2xl border border-gray-200 p-4">
+                <p class="text-sm font-bold text-gray-700 mb-2"><span class="material-symbols-outlined text-cyan-600 align-middle mr-1">router</span>Photo 2: SDWAN Router</p>
+                <div id="sv-thumb-2" class="mb-2"></div>
+                <button id="sv-capture-btn-2" onclick="svOpenCamera(2)" class="w-full py-3 border-2 border-dashed border-cyan-300 text-cyan-600 rounded-xl flex items-center justify-center gap-2 hover:bg-cyan-50 active:scale-95 transition-all text-sm font-semibold">
+                    <span class="material-symbols-outlined">photo_camera</span>Capture Router Photo
+                </button>
+            </div>
+            <!-- Photo 3 -->
+            <div class="bg-white rounded-2xl border border-gray-200 p-4">
+                <p class="text-sm font-bold text-gray-700 mb-2"><span class="material-symbols-outlined text-purple-600 align-middle mr-1">add_a_photo</span>Photo 3: Any Other Site Image</p>
+                <div id="sv-thumb-3" class="mb-2"></div>
+                <button id="sv-capture-btn-3" onclick="svOpenCamera(3)" class="w-full py-3 border-2 border-dashed border-purple-300 text-purple-600 rounded-xl flex items-center justify-center gap-2 hover:bg-purple-50 active:scale-95 transition-all text-sm font-semibold">
+                    <span class="material-symbols-outlined">photo_camera</span>Capture Site Photo
+                </button>
+            </div>
+        </div>
+        <!-- Bottom submit -->
+        <div class="px-4 py-4 bg-white border-t safe-bottom sticky bottom-0">
+            <p class="text-xs text-gray-500 text-center mb-2" id="sv-modal-count">0 of 3 photos captured</p>
+            <button id="sv-submit-btn" onclick="submitSVResubmit()" disabled
+                class="w-full py-4 bg-gradient-to-r from-red-600 to-rose-600 text-white font-bold text-base rounded-2xl shadow-lg disabled:opacity-40 disabled:cursor-not-allowed active:scale-95 transition-all flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined">send</span>
+                Submit for Re-verification
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Site Verification Camera Modal -->
+<div id="sv-camera-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-[60] flex flex-col">
+    <div class="flex justify-between items-center p-4 text-white">
+        <h3 class="text-base font-semibold" id="sv-camera-title">Capture Photo</h3>
+        <button onclick="svCloseCamera()" class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
+            <span class="material-symbols-outlined">close</span>
+        </button>
+    </div>
+    <div class="flex-1 flex items-center justify-center">
+        <video id="sv-camera-video" autoplay playsinline class="max-w-full max-h-full"></video>
+    </div>
+    <div class="p-4">
+        <button onclick="svTakePicture()" class="w-full py-4 bg-white text-gray-900 font-bold rounded-xl flex items-center justify-center gap-2">
+            <span class="material-symbols-outlined">photo_camera</span>Capture
+        </button>
+    </div>
+</div>
+
 {% endblock %}

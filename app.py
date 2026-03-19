@@ -868,24 +868,42 @@ def api_create_tracker():
             'attempts': [],               # [{submitted_at, action, actor, reason}]
         },
 
+        # ── Site Verification ─────────────────────────────────────────────
+        # FE captures 3 GPS-watermarked photos at site before creating tracker.
+        # NOC confirms (FE present) or rejects (FE not at site) before assigning.
+        # Rejected trackers require FE to resubmit new photos; rejection time is
+        # excluded from NOC queue-wait KPI (queue wait = confirmed_at → assigned_at).
+        'site_verification': {
+            'status': 'pending',          # pending | confirmed | rejected
+            'images': data.get('site_images', []),  # [{type, data, gps:{lat,lng,address}, captured_at}]
+            'noc_reviewed_at': None,
+            'noc_reviewed_by': None,
+            'noc_reviewer_name': None,
+            'rejection_reason': None,
+            'rejection_count': 0,
+            'last_submitted_at': now,
+        },
+
         # ── Dedicated Stage Timestamps ────────────────────────────────────
         # These are set once (first occurrence) as the tracker progresses.
         # Having them as top-level indexed fields makes KPI aggregation fast
         # without scanning the events array on every analytics query.
         'stage_timestamps': {
-            'tracker_created_at':          now,
-            'noc_assigned_at':             None,
-            'sim1_activation_started_at':  None,
-            'sim1_activation_done_at':     None,
-            'sim2_activation_started_at':  None,
-            'sim2_activation_done_at':     None,
-            'ztp_config_verified_at':      None,
-            'ztp_started_at':              None,
-            'ztp_done_at':                 None,
-            'ready_for_coordination_at':   None,
-            'hso_submitted_at':            None,
-            'hso_approved_at':             None,
-            'installation_complete_at':    None,
+            'tracker_created_at':                now,
+            'site_verification_submitted_at':    now,
+            'site_verification_confirmed_at':    None,
+            'noc_assigned_at':                   None,
+            'sim1_activation_started_at':        None,
+            'sim1_activation_done_at':           None,
+            'sim2_activation_started_at':        None,
+            'sim2_activation_done_at':           None,
+            'ztp_config_verified_at':            None,
+            'ztp_started_at':                    None,
+            'ztp_done_at':                       None,
+            'ready_for_coordination_at':         None,
+            'hso_submitted_at':                  None,
+            'hso_approved_at':                   None,
+            'installation_complete_at':          None,
         },
 
         # ── Event Log ─────────────────────────────────────────────────────
@@ -928,6 +946,15 @@ def api_assign_tracker(tracker_id):
     if session.get('role') != ROLE_NS:
         return jsonify({'error': 'Unauthorized'}), 403
 
+    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    if not tracker:
+        return jsonify({'error': 'Tracker not found'}), 404
+
+    # Guard: site verification must be confirmed before assignment
+    sv = tracker.get('site_verification', {})
+    if sv.get('status') != 'confirmed':
+        return jsonify({'error': 'Site verification not confirmed. Confirm FE is at site before assigning.'}), 400
+
     now = get_utc_now()
     noc_name = session.get('noc_name', session['username'])
 
@@ -967,6 +994,180 @@ def api_assign_tracker(tracker_id):
         'noc_assignee': session['user_id']
     })
     
+    return jsonify({'success': True})
+
+
+# ─── NOC: Confirm Site Verification ─────────────────────────────────────────
+@app.route('/api/trackers/<tracker_id>/site-verify/confirm', methods=['POST'])
+@login_required
+def api_site_verify_confirm(tracker_id):
+    if session.get('role') not in NOC_ROLES:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    if not tracker:
+        return jsonify({'error': 'Tracker not found'}), 404
+
+    sv = tracker.get('site_verification', {})
+    if sv.get('status') != 'pending':
+        return jsonify({'error': 'Site verification is not in pending state'}), 400
+
+    now = get_utc_now()
+    noc_name = session.get('noc_name', session['username'])
+
+    mongo.db.trackers.update_one(
+        {'_id': ObjectId(tracker_id)},
+        {
+            '$set': {
+                'site_verification.status': 'confirmed',
+                'site_verification.noc_reviewed_at': now,
+                'site_verification.noc_reviewed_by': session['user_id'],
+                'site_verification.noc_reviewer_name': noc_name,
+                'stage_timestamps.site_verification_confirmed_at': now,
+                'updated_at': now,
+            },
+            '$push': {
+                'events': make_event('site_verification_confirmed', session['user_id'],
+                                     session['role'],
+                                     f"Site verification confirmed by {noc_name} — FE confirmed at site")
+            }
+        }
+    )
+
+    broadcast_tracker_update(tracker_id, 'site_verification_confirmed', {
+        'site_verification_status': 'confirmed',
+        'noc_reviewer_name': noc_name,
+    })
+    # Notify FE dashboard
+    fe_id = tracker.get('fe', {}).get('id')
+    if fe_id:
+        broadcast_to_user(fe_id, 'site_verification_confirmed', {
+            'tracker_id': tracker_id,
+            'sdwan_id': tracker.get('sdwan_id'),
+            'message': 'Your site verification was confirmed. Awaiting NOC assignment.'
+        })
+
+    return jsonify({'success': True})
+
+
+# ─── NOC: Reject Site Verification ──────────────────────────────────────────
+@app.route('/api/trackers/<tracker_id>/site-verify/reject', methods=['POST'])
+@login_required
+def api_site_verify_reject(tracker_id):
+    if session.get('role') not in NOC_ROLES:
+        return jsonify({'error': 'Unauthorized'}), 403
+
+    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    if not tracker:
+        return jsonify({'error': 'Tracker not found'}), 404
+
+    sv = tracker.get('site_verification', {})
+    if sv.get('status') != 'pending':
+        return jsonify({'error': 'Site verification is not in pending state'}), 400
+
+    data = request.json or {}
+    reason = data.get('reason', '').strip()
+    if not reason:
+        return jsonify({'error': 'Rejection reason is required'}), 400
+
+    now = get_utc_now()
+    noc_name = session.get('noc_name', session['username'])
+
+    mongo.db.trackers.update_one(
+        {'_id': ObjectId(tracker_id)},
+        {
+            '$set': {
+                'site_verification.status': 'rejected',
+                'site_verification.noc_reviewed_at': now,
+                'site_verification.noc_reviewed_by': session['user_id'],
+                'site_verification.noc_reviewer_name': noc_name,
+                'site_verification.rejection_reason': reason,
+                'updated_at': now,
+            },
+            '$inc': {
+                'site_verification.rejection_count': 1,
+            },
+            '$push': {
+                'events': make_event('site_verification_rejected', session['user_id'],
+                                     session['role'],
+                                     f"Site verification rejected by {noc_name}: {reason}")
+            }
+        }
+    )
+
+    broadcast_tracker_update(tracker_id, 'site_verification_rejected', {
+        'site_verification_status': 'rejected',
+        'rejection_reason': reason,
+    })
+    # Notify FE with urgent push
+    fe_id = tracker.get('fe', {}).get('id')
+    if fe_id:
+        broadcast_to_user(fe_id, 'site_verification_rejected', {
+            'tracker_id': tracker_id,
+            'sdwan_id': tracker.get('sdwan_id'),
+            'rejection_reason': reason,
+            'message': f"Site verification rejected: {reason}. Please retake site photos."
+        })
+
+    return jsonify({'success': True})
+
+
+# ─── FE: Resubmit Site Verification ─────────────────────────────────────────
+@app.route('/api/trackers/<tracker_id>/site-verify/resubmit', methods=['POST'])
+@login_required
+def api_site_verify_resubmit(tracker_id):
+    if session.get('role') != ROLE_FE:
+        return jsonify({'error': 'Only Field Engineers can resubmit site verification'}), 403
+
+    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    if not tracker:
+        return jsonify({'error': 'Tracker not found'}), 404
+
+    # Only the FE who created the tracker can resubmit
+    if tracker.get('fe', {}).get('id') != session['user_id']:
+        return jsonify({'error': 'Unauthorized — not the tracker owner'}), 403
+
+    sv = tracker.get('site_verification', {})
+    if sv.get('status') != 'rejected':
+        return jsonify({'error': 'Site verification is not in rejected state'}), 400
+
+    data = request.json or {}
+    new_images = data.get('site_images', [])
+    if len(new_images) < 3:
+        return jsonify({'error': 'All 3 site photos are required'}), 400
+
+    now = get_utc_now()
+
+    mongo.db.trackers.update_one(
+        {'_id': ObjectId(tracker_id)},
+        {
+            '$set': {
+                'site_verification.status': 'pending',
+                'site_verification.images': new_images,
+                'site_verification.last_submitted_at': now,
+                'site_verification.noc_reviewed_at': None,
+                'site_verification.noc_reviewed_by': None,
+                'site_verification.noc_reviewer_name': None,
+                'site_verification.rejection_reason': None,
+                'stage_timestamps.site_verification_submitted_at': now,
+                'updated_at': now,
+            },
+            '$push': {
+                'events': make_event('site_verification_resubmitted', session['user_id'],
+                                     ROLE_FE,
+                                     'FE resubmitted site verification photos')
+            }
+        }
+    )
+
+    broadcast_tracker_update(tracker_id, 'site_verification_resubmitted', {
+        'site_verification_status': 'pending',
+    })
+    broadcast_dashboard_update(ROLE_NS, 'site_verification_resubmitted', {
+        'tracker_id': tracker_id,
+        'sdwan_id': tracker.get('sdwan_id'),
+    })
+
     return jsonify({'success': True})
 
 
@@ -3043,7 +3244,11 @@ def broadcast_to_user(user_id, event_type, data):
 
 
 if __name__ == '__main__':
-    # Use socketio.run() instead of app.run() for WebSocket support
+    # Use socketio.run() instead of app.run() for WebSocket support.
+    # simple-websocket (installed via python-engineio) handles WebSocket at the
+    # WSGI application level — no Werkzeug internal patching needed, so
+    # allow_unsafe_werkzeug is NOT required and caused "write() before
+    # start_response" errors with Werkzeug 3.0.
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
-    socketio.run(app, debug=debug, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    socketio.run(app, debug=debug, host='0.0.0.0', port=5000)
 

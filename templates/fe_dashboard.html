@@ -680,10 +680,55 @@
 
 <!-- Floating Action Button - Modern Enhanced (Only for FIELD_ENGINEER role) -->
 {% if session.role == 'FIELD_ENGINEER' %}
-<button onclick="window.location.href='/fe/new-installation'" 
+<button onclick="showSitePresenceConfirm()"
     class="fixed bottom-6 right-6 h-16 w-16 bg-gradient-to-r from-theme-primary to-theme-secondary text-white rounded-2xl shadow-2xl hover:shadow-3xl hover:scale-110 active:scale-95 transition-all duration-300 flex items-center justify-center z-50 group">
     <span class="material-symbols-outlined text-3xl group-hover:rotate-90 transition-transform duration-300">add</span>
 </button>
+
+<!-- Site Presence Confirmation Modal -->
+<div id="site-presence-modal" class="hidden fixed inset-0 bg-black bg-opacity-70 z-[60] flex items-end justify-center p-4 backdrop-blur-sm">
+    <div class="bg-white rounded-3xl shadow-2xl w-full max-w-sm p-6 mb-2 animate-slide-up">
+        <div class="flex flex-col items-center text-center mb-6">
+            <div class="h-16 w-16 bg-teal-100 rounded-2xl flex items-center justify-center mb-4">
+                <span class="material-symbols-outlined text-4xl text-teal-600">location_on</span>
+            </div>
+            <h2 class="text-lg font-bold text-gray-900 mb-2">Site Presence Confirmation</h2>
+            <p class="text-sm text-gray-600 leading-relaxed">
+                Are you <strong>physically present at the installation site</strong> right now?<br>
+                <span class="text-xs text-orange-600 mt-1 block">You must be at site to create a tracker. Creating from home is not permitted.</span>
+            </p>
+        </div>
+        <div class="space-y-3">
+            <button onclick="confirmAtSite()"
+                class="w-full py-4 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-bold rounded-2xl shadow-lg hover:shadow-xl active:scale-95 transition-all duration-200 flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined">check_circle</span>
+                Yes, I am physically at site
+            </button>
+            <button onclick="closeSitePresenceModal()"
+                class="w-full py-3 bg-gray-100 text-gray-700 font-semibold rounded-2xl hover:bg-gray-200 active:scale-95 transition-all duration-200 flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined">close</span>
+                No, I am not at site
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+function showSitePresenceConfirm() {
+    document.getElementById('site-presence-modal').classList.remove('hidden');
+}
+function closeSitePresenceModal() {
+    document.getElementById('site-presence-modal').classList.add('hidden');
+}
+function confirmAtSite() {
+    closeSitePresenceModal();
+    window.location.href = '/fe/new-installation';
+}
+// Close on backdrop click
+document.getElementById('site-presence-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeSitePresenceModal();
+});
+</script>
 {% endif %}
 
 <style>

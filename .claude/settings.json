@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip install:*)",
+      "Bash(python -c \"import eventlet; print\\(''eventlet'', eventlet.__version__, ''OK''\\)\")"
+    ]
+  }
+}

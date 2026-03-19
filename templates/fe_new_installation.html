@@ -11,20 +11,179 @@
 <header class="bg-gradient-to-r from-teal-600 to-cyan-600 text-white safe-top sticky top-0 z-50 shadow-2xl backdrop-blur-md bg-opacity-95">
     <div class="px-4 py-4">
         <div class="flex items-center gap-4">
-            <button onclick="window.history.back()" class="h-12 w-12 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30 transition-all duration-300 active:scale-95 backdrop-blur-sm shadow-lg ring-2 ring-white ring-opacity-30">
+            <button onclick="handleBack()" class="h-12 w-12 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30 transition-all duration-300 active:scale-95 backdrop-blur-sm shadow-lg ring-2 ring-white ring-opacity-30">
                 <span class="material-symbols-outlined text-xl">arrow_back</span>
             </button>
             <div>
                 <h1 class="text-xl font-bold font-fjalla tracking-wide drop-shadow-lg">New Installation</h1>
-                <p class="text-sm text-teal-100 font-medium">Fill in site details</p>
+                <p class="text-sm text-teal-100 font-medium" id="header-subtitle">Step 1 of 2 — Site Verification</p>
             </div>
         </div>
     </div>
 </header>
 
-<!-- Main Content -->
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     STEP 1 — SITE PHOTO CAPTURE
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div id="step-site-photos">
+<main class="pb-56 px-4">
+    <div class="container mx-auto py-4 space-y-4 max-w-2xl">
+
+        <!-- Instruction Banner -->
+        <div class="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex gap-3">
+            <span class="material-symbols-outlined text-amber-600 text-2xl flex-shrink-0 mt-0.5">photo_camera</span>
+            <div>
+                <p class="text-sm font-bold text-amber-800">Capture 3 site photos to verify your presence</p>
+                <p class="text-xs text-amber-700 mt-1">Each photo is automatically stamped with your GPS location. These will be reviewed by NOC before assigning your tracker.</p>
+            </div>
+        </div>
+
+        <!-- GPS Status Banner -->
+        <div id="gps-status-banner" class="bg-blue-50 border border-blue-200 rounded-2xl p-3 flex items-center gap-2">
+            <span class="material-symbols-outlined text-blue-500 text-lg" id="gps-icon">gps_not_fixed</span>
+            <p class="text-xs text-blue-700" id="gps-status-text">Acquiring GPS location…</p>
+        </div>
+
+        <!-- Photo 1: Booster -->
+        <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-5">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="h-10 w-10 bg-teal-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <span class="material-symbols-outlined text-teal-600">cell_tower</span>
+                </div>
+                <div>
+                    <h3 class="font-bold text-gray-800 text-sm">Photo 1: Booster / Antenna</h3>
+                    <p class="text-xs text-gray-500">Capture the booster or antenna at the site</p>
+                </div>
+                <span id="photo1-check" class="ml-auto text-gray-300 material-symbols-outlined text-2xl">radio_button_unchecked</span>
+            </div>
+            <div id="photo1-preview" class="hidden mb-2">
+                <div class="relative rounded-xl overflow-hidden bg-gray-100 mb-2" style="aspect-ratio:4/3;">
+                    <img id="photo1-img" class="w-full h-full object-cover">
+                    <div id="photo1-gps-overlay" class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white px-2 py-1.5 text-xs font-mono leading-snug"></div>
+                    <div class="absolute top-2 left-2 bg-teal-600 text-white text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1">
+                        <span class="material-symbols-outlined text-sm">check_circle</span>Captured
+                    </div>
+                </div>
+                <button onclick="retakePhoto(1)"
+                    class="w-full py-2.5 border-2 border-red-300 text-red-600 bg-red-50 rounded-xl flex items-center justify-center gap-2 hover:bg-red-100 active:scale-95 transition-all font-semibold text-sm">
+                    <span class="material-symbols-outlined text-lg">refresh</span>
+                    Retake Booster Photo
+                </button>
+            </div>
+            <button onclick="startSiteCapture(1)"
+                id="photo1-btn"
+                class="w-full py-3 border-2 border-dashed border-teal-300 text-teal-600 rounded-xl flex items-center justify-center gap-2 hover:bg-teal-50 transition-all active:scale-95">
+                <span class="material-symbols-outlined">photo_camera</span>
+                <span class="font-semibold text-sm">Capture Booster Photo</span>
+            </button>
+        </div>
+
+        <!-- Photo 2: SDWAN Router -->
+        <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-5">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="h-10 w-10 bg-cyan-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <span class="material-symbols-outlined text-cyan-600">router</span>
+                </div>
+                <div>
+                    <h3 class="font-bold text-gray-800 text-sm">Photo 2: SDWAN Router</h3>
+                    <p class="text-xs text-gray-500">Capture the SDWAN router at the site</p>
+                </div>
+                <span id="photo2-check" class="ml-auto text-gray-300 material-symbols-outlined text-2xl">radio_button_unchecked</span>
+            </div>
+            <div id="photo2-preview" class="hidden mb-2">
+                <div class="relative rounded-xl overflow-hidden bg-gray-100 mb-2" style="aspect-ratio:4/3;">
+                    <img id="photo2-img" class="w-full h-full object-cover">
+                    <div id="photo2-gps-overlay" class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white px-2 py-1.5 text-xs font-mono leading-snug"></div>
+                    <div class="absolute top-2 left-2 bg-teal-600 text-white text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1">
+                        <span class="material-symbols-outlined text-sm">check_circle</span>Captured
+                    </div>
+                </div>
+                <button onclick="retakePhoto(2)"
+                    class="w-full py-2.5 border-2 border-red-300 text-red-600 bg-red-50 rounded-xl flex items-center justify-center gap-2 hover:bg-red-100 active:scale-95 transition-all font-semibold text-sm">
+                    <span class="material-symbols-outlined text-lg">refresh</span>
+                    Retake Router Photo
+                </button>
+            </div>
+            <button onclick="startSiteCapture(2)"
+                id="photo2-btn"
+                class="w-full py-3 border-2 border-dashed border-cyan-300 text-cyan-600 rounded-xl flex items-center justify-center gap-2 hover:bg-cyan-50 transition-all active:scale-95">
+                <span class="material-symbols-outlined">photo_camera</span>
+                <span class="font-semibold text-sm">Capture Router Photo</span>
+            </button>
+        </div>
+
+        <!-- Photo 3: Other -->
+        <div class="bg-white rounded-2xl shadow-xl border border-gray-100 p-5" style="margin-bottom:7rem;">
+            <div class="flex items-center gap-3 mb-4">
+                <div class="h-10 w-10 bg-purple-100 rounded-xl flex items-center justify-center flex-shrink-0">
+                    <span class="material-symbols-outlined text-purple-600">add_a_photo</span>
+                </div>
+                <div>
+                    <h3 class="font-bold text-gray-800 text-sm">Photo 3: Any Other Site Image</h3>
+                    <p class="text-xs text-gray-500">Capture any other identifying element at the site</p>
+                </div>
+                <span id="photo3-check" class="ml-auto text-gray-300 material-symbols-outlined text-2xl">radio_button_unchecked</span>
+            </div>
+            <div id="photo3-preview" class="hidden mb-2">
+                <div class="relative rounded-xl overflow-hidden bg-gray-100 mb-2" style="aspect-ratio:4/3;">
+                    <img id="photo3-img" class="w-full h-full object-cover">
+                    <div id="photo3-gps-overlay" class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white px-2 py-1.5 text-xs font-mono leading-snug"></div>
+                    <div class="absolute top-2 left-2 bg-teal-600 text-white text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1">
+                        <span class="material-symbols-outlined text-sm">check_circle</span>Captured
+                    </div>
+                </div>
+                <button onclick="retakePhoto(3)"
+                    class="w-full py-2.5 border-2 border-red-300 text-red-600 bg-red-50 rounded-xl flex items-center justify-center gap-2 hover:bg-red-100 active:scale-95 transition-all font-semibold text-sm">
+                    <span class="material-symbols-outlined text-lg">refresh</span>
+                    Retake Site Photo
+                </button>
+            </div>
+            <button onclick="startSiteCapture(3)"
+                id="photo3-btn"
+                class="w-full py-3 border-2 border-dashed border-purple-300 text-purple-600 rounded-xl flex items-center justify-center gap-2 hover:bg-purple-50 transition-all active:scale-95">
+                <span class="material-symbols-outlined">photo_camera</span>
+                <span class="font-semibold text-sm">Capture Site Photo</span>
+            </button>
+        </div>
+
+    </div>
+</main>
+
+<!-- Step 1 Bottom Bar -->
+<div class="fixed bottom-0 left-0 right-0 px-4 py-4 bg-white border-t safe-bottom shadow-2xl z-40">
+    <div class="container mx-auto max-w-2xl">
+        <div class="flex items-center gap-3 mb-2">
+            <div class="flex gap-1.5">
+                <span id="step-dot-1" class="h-2 w-6 rounded-full bg-teal-600 transition-all duration-300"></span>
+                <span id="step-dot-2" class="h-2 w-2 rounded-full bg-gray-300 transition-all duration-300"></span>
+            </div>
+            <span class="text-xs text-gray-500" id="photos-count-text">0 of 3 photos captured</span>
+        </div>
+        <button id="proceed-btn" onclick="proceedToForm()"
+            class="w-full py-4 bg-gradient-to-r from-teal-600 to-cyan-600 text-white font-bold text-lg rounded-2xl shadow-xl transition-all duration-300 active:scale-95 flex items-center justify-center gap-2 opacity-40"
+            style="cursor:not-allowed;">
+            <span class="material-symbols-outlined text-2xl">arrow_forward</span>
+            <span>Next: Fill Installation Details</span>
+        </button>
+    </div>
+</div>
+</div><!-- end #step-site-photos -->
+
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     STEP 2 — INSTALLATION FORM
+     ═══════════════════════════════════════════════════════════════════════════ -->
+<div id="step-installation-form" class="hidden">
 <main class="pb-24 px-4">
     <form id="installation-form" class="container mx-auto py-4 space-y-4 max-w-6xl">
+
+        <!-- Site Photos Summary (collapsed) -->
+        <div class="bg-teal-50 border border-teal-200 rounded-2xl p-3 flex items-center gap-3">
+            <span class="material-symbols-outlined text-teal-600">check_circle</span>
+            <p class="text-sm text-teal-800 font-semibold">3 site verification photos captured with GPS</p>
+            <button type="button" onclick="goBackToPhotos()" class="ml-auto text-xs text-teal-600 underline">Edit</button>
+        </div>
+
         <!-- Row 1: SDWAN ID, Customer Name, and FE Phone -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <!-- SDWAN ID -->
@@ -37,7 +196,7 @@
                     <input type="text" id="sdwan_id" required
                         class="flex-1 px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-teal-500 focus:border-teal-500 transition-all duration-300"
                         placeholder="SDW-12345">
-                    <button type="button" onclick="captureImage('sdwan_id')" 
+                    <button type="button" onclick="captureImage('sdwan_id')"
                         class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 hover:shadow-md transition-all duration-300 active:scale-95 flex-shrink-0">
                         <span class="material-symbols-outlined text-xl">photo_camera</span>
                     </button>
@@ -111,18 +270,18 @@
                             <option value="VI">VI (Vodafone Idea)</option>
                             <option value="BSNL">BSNL</option>
                         </select>
-                        <button type="button" onclick="captureImage('sim1_provider')" 
+                        <button type="button" onclick="captureImage('sim1_provider')"
                             class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
                             <span class="material-symbols-outlined icon-sm">photo_camera</span>
                         </button>
                     </div>
                     <div id="sim1_provider_preview" class="mt-2"></div>
-                    
+
                     <div class="flex gap-2">
                         <input type="text" id="sim1_number" required
                             class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                             placeholder="SIM 1 Number">
-                        <button type="button" onclick="captureImage('sim1_number')" 
+                        <button type="button" onclick="captureImage('sim1_number')"
                             class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
                             <span class="material-symbols-outlined icon-sm">photo_camera</span>
                         </button>
@@ -146,18 +305,18 @@
                             <option value="VI">VI (Vodafone Idea)</option>
                             <option value="BSNL">BSNL</option>
                         </select>
-                        <button type="button" onclick="captureImage('sim2_provider')" 
+                        <button type="button" onclick="captureImage('sim2_provider')"
                             class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
                             <span class="material-symbols-outlined icon-sm">photo_camera</span>
                         </button>
                     </div>
                     <div id="sim2_provider_preview" class="mt-2"></div>
-                    
+
                     <div class="flex gap-2">
                         <input type="text" id="sim2_number"
                             class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                             placeholder="SIM 2 Number">
-                        <button type="button" onclick="captureImage('sim2_number')" 
+                        <button type="button" onclick="captureImage('sim2_number')"
                             class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
                             <span class="material-symbols-outlined icon-sm">photo_camera</span>
                         </button>
@@ -192,7 +351,7 @@
                         <input type="text" id="router_firmware_version" required
                             class="flex-1 px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                             placeholder="Firmware Version (e.g., v2.3.1)">
-                        <button type="button" onclick="captureImage('router_firmware_version')" 
+                        <button type="button" onclick="captureImage('router_firmware_version')"
                             class="h-12 w-12 bg-teal-100 text-teal-600 rounded-xl flex items-center justify-center hover:bg-teal-200 transition-all flex-shrink-0">
                             <span class="material-symbols-outlined icon-sm">photo_camera</span>
                         </button>
@@ -214,141 +373,378 @@
         </div>
     </form>
 </main>
+</div><!-- end #step-installation-form -->
 
-<!-- Camera Modal -->
+
+<!-- ═══════════════════════════════════════════════════════════════════════════
+     SHARED: CAMERA MODAL (used for both site photos and form fields)
+     ═══════════════════════════════════════════════════════════════════════════ -->
 <div id="camera-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">
     <div class="w-full h-full flex flex-col">
         <div class="flex justify-between items-center p-4 text-white">
-            <h3 class="text-lg font-semibold">Capture Image</h3>
+            <h3 class="text-lg font-semibold" id="camera-modal-title">Capture Image</h3>
             <button onclick="closeCamera()" class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
                 <span class="material-symbols-outlined icon-sm">close</span>
             </button>
         </div>
-        <div class="flex-1 flex items-center justify-center">
+        <div class="flex-1 flex items-center justify-center relative">
             <video id="camera-video" autoplay playsinline class="max-w-full max-h-full"></video>
             <canvas id="camera-canvas" class="hidden"></canvas>
+            <!-- GPS overlay on camera view -->
+            <div id="camera-gps-overlay" class="absolute bottom-2 left-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded font-mono leading-snug"></div>
         </div>
         <div class="p-4">
-            <button onclick="takePicture()" 
-                class="w-full py-4 bg-white text-gray-900 font-bold rounded-xl shadow-lg">
-                <span class="material-symbols-outlined icon-sm mr-2">photo_camera</span>Capture
+            <button onclick="takePicture()"
+                class="w-full py-4 bg-white text-gray-900 font-bold rounded-xl shadow-lg flex items-center justify-center gap-2">
+                <span class="material-symbols-outlined icon-sm">photo_camera</span>Capture
             </button>
         </div>
     </div>
 </div>
 
+
 <script>
-    let currentStream = null;
-    let currentField = null;
-    const capturedImages = {};
+// ─── GPS State ────────────────────────────────────────────────────────────────
+let gpsPosition = null;
+let gpsAddress  = null;
 
-    async function captureImage(fieldName) {
-        currentField = fieldName;
-        const modal = document.getElementById('camera-modal');
-        const video = document.getElementById('camera-video');
+async function initGPS() {
+    if (!navigator.geolocation) {
+        updateGPSBanner(false, 'GPS not supported on this device');
+        return;
+    }
+    updateGPSBanner(null, 'Acquiring GPS location…');
+    navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+            gpsPosition = pos.coords;
+            updateGPSBanner(true, `GPS acquired: ${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`);
+            // Try reverse geocoding via Nominatim (free, no API key)
+            try {
+                const resp = await fetch(
+                    `https://nominatim.openstreetmap.org/reverse?lat=${pos.coords.latitude}&lon=${pos.coords.longitude}&format=json`,
+                    { headers: { 'Accept-Language': 'en' } }
+                );
+                const geo = await resp.json();
+                gpsAddress = geo.display_name || null;
+                if (gpsAddress) {
+                    updateGPSBanner(true, `GPS + Address ready`);
+                }
+            } catch (_) { /* address unavailable, lat/lng still present */ }
+            updateCameraGPSOverlay();
+        },
+        (err) => {
+            updateGPSBanner(false,
+                err.code === 1 ? 'GPS permission denied — photos will have no location stamp'
+                               : 'GPS unavailable — photos will have no location stamp');
+        },
+        { enableHighAccuracy: true, timeout: 15000 }
+    );
+}
 
-        modal.classList.remove('hidden');
+function updateGPSBanner(ok, msg) {
+    const icon = document.getElementById('gps-icon');
+    const text = document.getElementById('gps-status-text');
+    const banner = document.getElementById('gps-status-banner');
+    text.textContent = msg;
+    if (ok === true) {
+        icon.textContent = 'gps_fixed';
+        icon.className = 'material-symbols-outlined text-green-600 text-lg';
+        banner.className = 'bg-green-50 border border-green-200 rounded-2xl p-3 flex items-center gap-2';
+        text.className = 'text-xs text-green-700';
+    } else if (ok === false) {
+        icon.textContent = 'gps_off';
+        icon.className = 'material-symbols-outlined text-red-500 text-lg';
+        banner.className = 'bg-red-50 border border-red-200 rounded-2xl p-3 flex items-center gap-2';
+        text.className = 'text-xs text-red-700';
+    } else {
+        icon.textContent = 'gps_not_fixed';
+        icon.className = 'material-symbols-outlined text-blue-500 text-lg';
+        banner.className = 'bg-blue-50 border border-blue-200 rounded-2xl p-3 flex items-center gap-2';
+        text.className = 'text-xs text-blue-700';
+    }
+}
 
-        try {
-            currentStream = await navigator.mediaDevices.getUserMedia({ 
-                video: { facingMode: 'environment' } 
-            });
-            video.srcObject = currentStream;
-        } catch (error) {
-            showToast('Camera access denied', 'error');
-            closeCamera();
+function getGPSWatermarkLines() {
+    const now = new Date().toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false });
+    const lines = [];
+    if (gpsPosition) {
+        lines.push(`Lat: ${gpsPosition.latitude.toFixed(6)}  Lng: ${gpsPosition.longitude.toFixed(6)}`);
+        if (gpsAddress) {
+            // Split long address into ≤55-char chunks
+            const words = gpsAddress.split(', ');
+            let line = '';
+            for (const w of words) {
+                if ((line + (line ? ', ' : '') + w).length > 55) {
+                    if (line) lines.push(line);
+                    line = w;
+                } else {
+                    line = line ? line + ', ' + w : w;
+                }
+            }
+            if (line) lines.push(line);
+            // Cap at 3 address lines
+            while (lines.length > 4) lines.pop();
+        } else {
+            lines.push('Address unavailable');
+        }
+    } else {
+        lines.push('GPS LOCATION NOT AVAILABLE');
+    }
+    lines.push(now);
+    return lines;
+}
+
+function updateCameraGPSOverlay() {
+    const el = document.getElementById('camera-gps-overlay');
+    if (el) el.textContent = getGPSWatermarkLines().join(' | ');
+}
+
+// ─── Site Photo Capture ───────────────────────────────────────────────────────
+const sitePhotos = { 1: null, 2: null, 3: null };
+const sitePhotoTypes = { 1: 'booster', 2: 'router', 3: 'other' };
+const sitePhotoTitles = { 1: 'Capture Booster Photo', 2: 'Capture Router Photo', 3: 'Capture Site Photo' };
+let currentSitePhotoSlot = null;
+
+function startSiteCapture(slot) {
+    currentSitePhotoSlot = slot;
+    currentField = null; // not a form field
+    openCamera(sitePhotoTitles[slot]);
+}
+
+function retakePhoto(slot) {
+    sitePhotos[slot] = null;
+    document.getElementById(`photo${slot}-preview`).classList.add('hidden');
+    document.getElementById(`photo${slot}-btn`).classList.remove('hidden');
+    document.getElementById(`photo${slot}-check`).textContent = 'radio_button_unchecked';
+    document.getElementById(`photo${slot}-check`).className = 'ml-auto text-gray-300 material-symbols-outlined text-2xl';
+    updatePhotosProgress();
+}
+
+function updatePhotosProgress() {
+    const count = Object.values(sitePhotos).filter(Boolean).length;
+    document.getElementById('photos-count-text').textContent = `${count} of 3 photos captured`;
+    const btn = document.getElementById('proceed-btn');
+    if (count >= 3) {
+        btn.style.cursor = '';
+        btn.classList.remove('opacity-40');
+    } else {
+        btn.style.cursor = 'not-allowed';
+        btn.classList.add('opacity-40');
+    }
+    // Update per-photo check icons
+    for (let i = 1; i <= 3; i++) {
+        const check = document.getElementById(`photo${i}-check`);
+        if (sitePhotos[i]) {
+            check.textContent = 'check_circle';
+            check.className = 'ml-auto text-teal-600 material-symbols-outlined text-2xl';
         }
     }
+}
 
-    function takePicture() {
-        const video = document.getElementById('camera-video');
-        const canvas = document.getElementById('camera-canvas');
-        const context = canvas.getContext('2d');
+// ─── Form Field Camera Capture ───────────────────────────────────────────────
+let currentStream = null;
+let currentField  = null;
+const capturedImages = {};
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0);
+function captureImage(fieldName) {
+    currentField = fieldName;
+    currentSitePhotoSlot = null;
+    openCamera('Capture Image');
+}
 
-        const imageData = canvas.toDataURL('image/jpeg', 0.8);
-        capturedImages[currentField] = imageData;
+function openCamera(title) {
+    document.getElementById('camera-modal-title').textContent = title;
+    document.getElementById('camera-modal').classList.remove('hidden');
+    updateCameraGPSOverlay();
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+        .then(stream => {
+            currentStream = stream;
+            document.getElementById('camera-video').srcObject = stream;
+        })
+        .catch(() => {
+            showToast('Camera access denied', 'error');
+            closeCamera();
+        });
+}
 
+function drawWatermark(canvas, ctx) {
+    const lines = getGPSWatermarkLines();
+    const fontSize = Math.max(12, Math.floor(canvas.height * 0.022));
+    ctx.font = `bold ${fontSize}px monospace`;
+    const padding = Math.floor(fontSize * 0.6);
+    const lineH = Math.floor(fontSize * 1.5);
+    const boxW = Math.max(...lines.map(l => ctx.measureText(l).width)) + padding * 2;
+    const boxH = lines.length * lineH + padding * 2;
+    const boxY = canvas.height - boxH - 2;
+    // Semi-transparent background
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(2, boxY, boxW, boxH);
+    // Text
+    ctx.fillStyle = gpsPosition ? '#00FF88' : '#FF6666';
+    lines.forEach((line, i) => {
+        ctx.fillText(line, 2 + padding, boxY + padding + (i + 1) * lineH - Math.floor(lineH * 0.2));
+    });
+}
+
+function takePicture() {
+    const video  = document.getElementById('camera-video');
+    const canvas = document.getElementById('camera-canvas');
+    const ctx    = canvas.getContext('2d');
+
+    canvas.width  = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    drawWatermark(canvas, ctx);
+
+    const imageData = canvas.toDataURL('image/jpeg', 0.85);
+    const gpsSnap = gpsPosition
+        ? { lat: gpsPosition.latitude, lng: gpsPosition.longitude, address: gpsAddress || null }
+        : null;
+
+    if (currentSitePhotoSlot) {
+        // Store site photo
+        const slot = currentSitePhotoSlot;
+        sitePhotos[slot] = {
+            type: sitePhotoTypes[slot],
+            data: imageData,
+            gps: gpsSnap,
+            captured_at: new Date().toISOString()
+        };
         // Show preview
+        document.getElementById(`photo${slot}-img`).src = imageData;
+        document.getElementById(`photo${slot}-gps-overlay`).textContent =
+            gpsSnap ? `Lat: ${gpsSnap.lat.toFixed(6)}  Lng: ${gpsSnap.lng.toFixed(6)}` : 'GPS unavailable';
+        document.getElementById(`photo${slot}-preview`).classList.remove('hidden');
+        document.getElementById(`photo${slot}-btn`).classList.add('hidden');
+        updatePhotosProgress();
+        showToast(`Photo ${slot} captured`, 'success');
+    } else if (currentField) {
+        // Store form field image (no GPS needed here)
+        capturedImages[currentField] = imageData;
         const preview = document.getElementById(`${currentField}_preview`);
         preview.innerHTML = `
             <div class="relative inline-block">
                 <img src="${imageData}" class="h-20 w-20 object-cover rounded-lg border-2 border-blue-500">
-                <button type="button" onclick="removeImage('${currentField}')" 
+                <button type="button" onclick="removeImage('${currentField}')"
                     class="absolute -top-2 -right-2 h-6 w-6 bg-red-500 text-white rounded-full flex items-center justify-center text-xs">
                     <span class="material-symbols-outlined icon-sm">close</span>
                 </button>
-            </div>
-        `;
-
+            </div>`;
         showToast('Image captured successfully', 'success');
-        closeCamera();
     }
 
-    function removeImage(fieldName) {
-        delete capturedImages[fieldName];
-        document.getElementById(`${fieldName}_preview`).innerHTML = '';
+    closeCamera();
+}
+
+function removeImage(fieldName) {
+    delete capturedImages[fieldName];
+    document.getElementById(`${fieldName}_preview`).innerHTML = '';
+}
+
+function closeCamera() {
+    document.getElementById('camera-modal').classList.add('hidden');
+    if (currentStream) {
+        currentStream.getTracks().forEach(t => t.stop());
+        currentStream = null;
     }
+}
 
-    function closeCamera() {
-        const modal = document.getElementById('camera-modal');
-        modal.classList.add('hidden');
-
-        if (currentStream) {
-            currentStream.getTracks().forEach(track => track.stop());
-            currentStream = null;
-        }
-    }
-
-    document.getElementById('installation-form').addEventListener('submit', async (e) => {
-        e.preventDefault();
-
-        const formData = {
-            sdwan_id: document.getElementById('sdwan_id').value,
-            customer: document.getElementById('customer').value,
-            fe_phone: document.getElementById('fe_phone').value,
-            sim1_provider: document.getElementById('sim1_provider').value,
-            sim1_number: document.getElementById('sim1_number').value,
-            sim2_provider: document.getElementById('sim2_provider').value,
-            sim2_number: document.getElementById('sim2_number').value,
-            router_type: document.getElementById('router_type').value,
-            router_make: document.getElementById('router_make').value,
-            router_firmware_version: document.getElementById('router_firmware_version').value,
-            images: capturedImages
-        };
-
-        showLoading();
-
-        try {
-            const response = await fetch('/api/trackers', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData)
-            });
-
-            const data = await response.json();
-
-            if (response.status === 409) {
-                hideLoading();
-                if (confirm('This SDWAN ID already exists. Would you like to view it?')) {
-                    window.location.href = `/fe/tracker/${data.tracker_id}`;
-                }
-            } else if (data.success) {
-                showToast('Installation tracker created!', 'success');
-                setTimeout(() => {
-                    window.location.href = `/fe/tracker/${data.tracker._id}`;
-                }, 1000);
-            } else {
-                hideLoading();
-                showToast('Failed to create tracker', 'error');
+// ─── Step Navigation ──────────────────────────────────────────────────────────
+function proceedToForm() {
+    const labels = { 1: 'Booster / Antenna photo', 2: 'SDWAN Router photo', 3: 'Any other site photo' };
+    for (let i = 1; i <= 3; i++) {
+        if (!sitePhotos[i]) {
+            showToast(`Photo ${i} is mandatory: ${labels[i]}`, 'error');
+            // Scroll the missing photo card into view
+            document.getElementById(`photo${i}-btn`).scrollIntoView({ behavior: 'smooth', block: 'center' });
+            // Flash the card border
+            const card = document.getElementById(`photo${i}-btn`).closest('.bg-white');
+            if (card) {
+                card.classList.add('ring-2', 'ring-red-400');
+                setTimeout(() => card.classList.remove('ring-2', 'ring-red-400'), 2000);
             }
-        } catch (error) {
-            hideLoading();
-            showToast('An error occurred', 'error');
+            return;
         }
-    });
+    }
+    document.getElementById('step-site-photos').classList.add('hidden');
+    document.getElementById('step-installation-form').classList.remove('hidden');
+    document.getElementById('header-subtitle').textContent = 'Step 2 of 2 — Installation Details';
+    document.getElementById('step-dot-1').className = 'h-2 w-2 rounded-full bg-teal-400';
+    document.getElementById('step-dot-2').className = 'h-2 w-6 rounded-full bg-teal-600';
+    window.scrollTo(0, 0);
+}
+
+function goBackToPhotos() {
+    document.getElementById('step-installation-form').classList.add('hidden');
+    document.getElementById('step-site-photos').classList.remove('hidden');
+    document.getElementById('header-subtitle').textContent = 'Step 1 of 2 — Site Verification';
+    window.scrollTo(0, 0);
+}
+
+function handleBack() {
+    const formVisible = !document.getElementById('step-installation-form').classList.contains('hidden');
+    if (formVisible) {
+        goBackToPhotos();
+    } else {
+        window.history.back();
+    }
+}
+
+// ─── Form Submission ──────────────────────────────────────────────────────────
+document.getElementById('installation-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const siteImages = Object.values(sitePhotos).filter(Boolean);
+    if (siteImages.length < 3) {
+        showToast('Site verification photos missing — go back to Step 1', 'error');
+        return;
+    }
+
+    const formData = {
+        sdwan_id:               document.getElementById('sdwan_id').value,
+        customer:               document.getElementById('customer').value,
+        fe_phone:               document.getElementById('fe_phone').value,
+        sim1_provider:          document.getElementById('sim1_provider').value,
+        sim1_number:            document.getElementById('sim1_number').value,
+        sim2_provider:          document.getElementById('sim2_provider').value,
+        sim2_number:            document.getElementById('sim2_number').value,
+        router_type:            document.getElementById('router_type').value,
+        router_make:            document.getElementById('router_make').value,
+        router_firmware_version:document.getElementById('router_firmware_version').value,
+        images:                 capturedImages,
+        site_images:            siteImages,       // [{type, data, gps, captured_at}]
+    };
+
+    showLoading();
+
+    try {
+        const response = await fetch('/api/trackers', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(formData)
+        });
+
+        const data = await response.json();
+
+        if (response.status === 409) {
+            hideLoading();
+            if (confirm('This SDWAN ID already exists. Would you like to view it?')) {
+                window.location.href = `/fe/tracker/${data.tracker_id}`;
+            }
+        } else if (data.success) {
+            showToast('Installation tracker created!', 'success');
+            setTimeout(() => { window.location.href = `/fe/tracker/${data.tracker._id}`; }, 1000);
+        } else {
+            hideLoading();
+            showToast('Failed to create tracker', 'error');
+        }
+    } catch (error) {
+        hideLoading();
+        showToast('An error occurred', 'error');
+    }
+});
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+initGPS();
 </script>
 {% endblock %}

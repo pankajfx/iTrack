@@ -112,6 +112,22 @@
             </div>
         </div>
 
+        <!-- Unassigned Section - For NOC_SUPPORT_GROUP -->
+        <div class="bg-white rounded-lg shadow-md p-3 md:col-span-2">
+            <h3 class="text-xs font-bold text-gray-900 mb-2 flex items-center gap-1">
+                <span class="material-symbols-outlined icon-sm text-teal-600">inbox</span>
+                Unassigned
+            </h3>
+            <div class="flex justify-center">
+                <button onclick="filterTrackers('unassigned')" id="filter-unassigned"
+                    class="relative flex-1 px-3 py-2 text-xs rounded-lg font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1">
+                    <span class="material-symbols-outlined icon-sm">inbox</span>
+                    <span>View Unassigned</span>
+                    <span id="badge-unassigned" class="absolute -top-1 -right-1 h-5 w-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">0</span>
+                </button>
+            </div>
+        </div>
+
         <!-- My NOC Users Button - For NOC_SUPPORT_GROUP only -->
         <button onclick="openNOCUsersModal()" class="md:col-span-2 relative flex items-center justify-between gap-3 px-3 py-3 bg-gradient-to-r from-teal-600 via-cyan-600 to-blue-600 text-white rounded-lg hover:shadow-2xl hover:scale-[1.02] transition-all duration-300 shadow-md group">
             <div class="flex items-center gap-2">

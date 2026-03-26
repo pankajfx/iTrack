@@ -13,7 +13,7 @@ $Cfg = [ordered]@{
   VenvPython        = 'G:\srv\app\itracker\venv\Scripts\python.exe'
   WsgiObject        = 'app:app'                           # e.g., 'app:app' or use --call factory
   Port              = 5001
-  Threads           = 8
+  Threads           = 4
   UrlScheme         = 'https'                             # app thinks HTTPS behind proxy
   PIDFile           = 'G:\srv\app\itracker\itracker_waitress.pid'
 
@@ -53,59 +53,14 @@ function Test-Admin {
   ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-# Safer port->PID resolver that never touches $PID and prefers waitress/python
 function Get-ListenerInfo {
   param([int]$Port)
-
-  try {
-    $tcp = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop
-  } catch {
-    $tcp = @()
-  }
-
-  if (-not $tcp) {
-    return [pscustomobject]@{
-      Listening   = $false
-      PID         = $null
-      ProcessName = $null
-      CommandLine = $null
-    }
-  }
-
-  $candidates = foreach ($t in $tcp) {
-    $ownPid = $t.OwningProcess
-    $p      = Get-Process -Id $ownPid -ErrorAction SilentlyContinue
-    $cmd    = (Get-CimInstance Win32_Process -Filter "ProcessId=$ownPid" -ErrorAction SilentlyContinue).CommandLine
-
-    $score = 0
-    if ($p.Name -match 'waitress|python') { $score += 10 }
-    if ($cmd -match 'waitress-serve')     { $score += 10 }
-    if ($cmd -match [Regex]::Escape($Cfg.AppRoot)) { $score += 5 }
-
-    [pscustomobject]@{
-      Score       = $score
-      PID         = $ownPid
-      ProcessName = $p.Name
-      CommandLine = $cmd
-    }
-  }
-
-  $best = $candidates | Sort-Object Score -Descending | Select-Object -First 1
-  if (-not $best) {
-    return [pscustomobject]@{
-      Listening   = $true
-      PID         = $null
-      ProcessName = $null
-      CommandLine = $null
-    }
-  }
-
-  [pscustomobject]@{
-    Listening   = $true
-    PID         = $best.PID
-    ProcessName = $best.ProcessName
-    CommandLine = $best.CommandLine
-  }
+  try { $tcp = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop } catch { $tcp = $null }
+  if (-not $tcp) { return [pscustomobject]@{ Listening=$false; PID=$null; ProcessName=$null; CommandLine=$null } }
+  $procId = [int]($tcp | Select-Object -First 1).OwningProcess
+  $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+  $cmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue).CommandLine
+  [pscustomobject]@{ Listening=$true; PID=$procId; ProcessName=$p.Name; CommandLine=$cmd }
 }
 
 function Detach-Run {
@@ -156,13 +111,11 @@ function Stop-Flask {
   if (Test-Path $Cfg.PIDFile) {
     try {
       $filePid = [int]((Get-Content $Cfg.PIDFile -ErrorAction Stop | Select-Object -First 1).Trim())
-      if ($filePid -ne $PID) {
-        $proc = Get-Process -Id $filePid -ErrorAction SilentlyContinue
-        if ($proc) {
-          Stop-Process -Id $filePid -Force -ErrorAction SilentlyContinue
-          Write-Host "Stopped PID $filePid ($($proc.ProcessName)) from PID file."
-          $killed = $true
-        }
+      $proc = Get-Process -Id $filePid -ErrorAction SilentlyContinue
+      if ($proc) {
+        Stop-Process -Id $filePid -Force -ErrorAction SilentlyContinue
+        Write-Host "Stopped PID $filePid ($($proc.ProcessName)) from PID file."
+        $killed = $true
       }
     } catch {}
     Remove-Item $Cfg.PIDFile -Force -ErrorAction SilentlyContinue
@@ -174,7 +127,6 @@ function Stop-Flask {
   if ($listeners) {
     $portPids = @($listeners | Select-Object -ExpandProperty OwningProcess | Sort-Object -Unique)
     foreach ($pp in $portPids) {
-      if ($pp -eq $PID) { Write-Warning "Refusing to kill current shell (PID $PID)."; continue }
       $proc = Get-Process -Id $pp -ErrorAction SilentlyContinue
       if ($proc) {
         Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue
@@ -225,6 +177,7 @@ function Restart-Mongo { Restart-Service -Name $Cfg.MongoService -ErrorAction Si
 function Launch-Mongosh {
   $exe = Join-Path $Cfg.MongoshDir 'mongosh.exe'
   if (-not (Test-Path $exe)) { Write-Warning "mongosh.exe not found in $($Cfg.MongoshDir)."; return }
+  # Start mongosh in its folder (new window)
   Start-Process -FilePath $exe -WorkingDirectory $Cfg.MongoshDir
 }
 
@@ -391,8 +344,7 @@ function Uninstall-NginxService {
 $admin = Test-Admin
 if (-not $admin) { Write-Warning "Tip: Run PowerShell as Administrator for service control and local root trust." }
 
-$running = $true
-while ($running) {
+do {
   Clear-Host
   $flask = Get-FlaskStatus
   $mongo = Get-MongoStatus
@@ -440,7 +392,7 @@ while ($running) {
     'R' { Uninstall-NginxService; Pause }
     'S' { Install-WaitressService; Pause }
     'T' { Uninstall-WaitressService; Pause }
-    '0' { $running = $false; continue }
+    '0' { break }
     default { }
   }
-}
+} while ($true)

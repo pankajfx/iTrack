@@ -3244,11 +3244,9 @@ def broadcast_to_user(user_id, event_type, data):
 
 
 if __name__ == '__main__':
-    # Use socketio.run() instead of app.run() for WebSocket support.
-    # simple-websocket (installed via python-engineio) handles WebSocket at the
-    # WSGI application level — no Werkzeug internal patching needed, so
-    # allow_unsafe_werkzeug is NOT required and caused "write() before
-    # start_response" errors with Werkzeug 3.0.
+    # eventlet.monkey_patch() at module top gives Flask-SocketIO native WebSocket
+    # support. socketio.run() uses eventlet's WSGI server — no Waitress/Gunicorn needed.
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
-    socketio.run(app, debug=debug, host='0.0.0.0', port=5000)
+    port = int(os.environ.get('PORT', 5001))
+    socketio.run(app, debug=debug, host='0.0.0.0', port=port)
 

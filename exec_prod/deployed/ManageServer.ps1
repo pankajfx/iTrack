@@ -123,28 +123,31 @@ function Pause { Read-Host 'Press ENTER to continue...' }
 # -------------------- Waitress (Flask) --------------------
 function Get-FlaskStatus {
   $info = Get-ListenerInfo -Port $Cfg.Port
-  if ($info.Listening) { "RUNNING (port $($Cfg.Port), PID $($info.PID), $($info.ProcessName))" } else { "STOPPED" }
+  if ($info.Listening) { "RUNNING (port $($Cfg.Port), PID $($info.PID), $($info.ProcessName)) [socketio.run]" } else { "STOPPED" }
 }
 
 function Start-Flask {
-  if (-not (Test-Path $Cfg.WaitressExe)) {
-    Write-Warning "waitress-serve.exe not found at $($Cfg.WaitressExe). Install in your venv: `"$($Cfg.VenvPython)`" -m pip install waitress"
+  if (-not (Test-Path $Cfg.VenvPython)) {
+    Write-Warning "Python not found at $($Cfg.VenvPython)."
     return
   }
   $info = Get-ListenerInfo -Port $Cfg.Port
-  if ($info.Listening) { Write-Host "Waitress already listening on $($Cfg.Port) (PID $($info.PID))." -ForegroundColor Yellow; return }
+  if ($info.Listening) { Write-Host "App already listening on $($Cfg.Port) (PID $($info.PID))." -ForegroundColor Yellow; return }
 
   Push-Location $Cfg.AppRoot
   try {
-    $waitressArgs = @("--listen=*:$($Cfg.Port)","--threads=$($Cfg.Threads)","--ident=$($Cfg.AppName)","--url-scheme=$($Cfg.UrlScheme)", $Cfg.WsgiObject)
-    Detach-Run -FilePath $Cfg.WaitressExe -ArgumentList $waitressArgs -WorkingDirectory $Cfg.AppRoot
+    # NOTE: Waitress cannot handle WebSocket upgrades (WSGI-only).
+    # Flask-SocketIO requires socketio.run() or an async server (eventlet/gevent).
+    # We launch app.py directly — socketio.run() uses simple-websocket for WS support.
+    $env:PORT = $Cfg.Port
+    Detach-Run -FilePath $Cfg.VenvPython -ArgumentList @('app.py') -WorkingDirectory $Cfg.AppRoot
     Start-Sleep 2
     $post = Get-ListenerInfo -Port $Cfg.Port
     if ($post.Listening) {
       $post.PID | Out-File -FilePath $Cfg.PIDFile -Encoding ascii -Force
-      Write-Host "Started waitress on port $($Cfg.Port) (PID $($post.PID))."
+      Write-Host "Started Flask/SocketIO on port $($Cfg.Port) (PID $($post.PID))."
     } else {
-      Write-Error "Waitress failed to bind to :$($Cfg.Port). Check module/object '$($Cfg.WsgiObject)' and any prior listeners."
+      Write-Error "App failed to bind to :$($Cfg.Port). Check app.py and venv dependencies."
     }
   } finally { Pop-Location }
 }
@@ -177,18 +180,23 @@ function Stop-Flask {
       if ($pp -eq $PID) { Write-Warning "Refusing to kill current shell (PID $PID)."; continue }
       $proc = Get-Process -Id $pp -ErrorAction SilentlyContinue
       if ($proc) {
-        Stop-Process -Id $pp -Force -ErrorAction SilentlyContinue
-        Write-Host "Killed PID $pp ($($proc.ProcessName)) on port $($Cfg.Port)."
-        $killed = $true
+        try {
+          Stop-Process -Id $pp -Force -ErrorAction Stop
+          Write-Host "Killed PID $pp ($($proc.ProcessName)) on port $($Cfg.Port)."
+          $killed = $true
+        } catch {
+          Write-Warning "Could not kill PID $pp ($($proc.ProcessName)): $($_.Exception.Message)"
+          Write-Warning "Try running this script as Administrator."
+        }
       }
     }
   }
 
   if (-not $killed) { Write-Host "Nothing to stop on port $($Cfg.Port)."; return }
 
-  Start-Sleep 1
+  Start-Sleep 3
   if (Get-NetTCPConnection -LocalPort $Cfg.Port -State Listen -ErrorAction SilentlyContinue) {
-    Write-Warning "Port $($Cfg.Port) still in use after stop attempt."
+    Write-Warning "Port $($Cfg.Port) still in use. If above showed a permission error, re-run as Administrator."
   } else {
     Write-Host "Port $($Cfg.Port) is free." -ForegroundColor Green
   }

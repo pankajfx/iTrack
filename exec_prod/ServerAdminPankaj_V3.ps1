@@ -177,9 +177,26 @@ function Uninstall-WaitressService {
 function Get-MongoStatus {
   try { (Get-Service -Name $Cfg.MongoService -ErrorAction Stop).Status } catch { "NotFound" }
 }
-function Start-Mongo { Start-Service -Name $Cfg.MongoService -ErrorAction SilentlyContinue; Get-MongoStatus }
-function Stop-Mongo  { Stop-Service  -Name $Cfg.MongoService -ErrorAction SilentlyContinue; Get-MongoStatus }
-function Restart-Mongo { Restart-Service -Name $Cfg.MongoService -ErrorAction SilentlyContinue; Get-MongoStatus }
+function Start-Mongo {
+  Write-Host "Starting MongoDB service..."
+  & net start $Cfg.MongoService
+  Start-Sleep 2
+  Write-Host "MongoDB: $(Get-MongoStatus)"
+}
+function Stop-Mongo {
+  Write-Host "Stopping MongoDB service..."
+  & net stop $Cfg.MongoService
+  Start-Sleep 2
+  Write-Host "MongoDB: $(Get-MongoStatus)"
+}
+function Restart-Mongo {
+  Write-Host "Restarting MongoDB service..."
+  & net stop $Cfg.MongoService
+  Start-Sleep 2
+  & net start $Cfg.MongoService
+  Start-Sleep 2
+  Write-Host "MongoDB: $(Get-MongoStatus)"
+}
 
 function Launch-Mongosh {
   $exe = Join-Path $Cfg.MongoshDir 'mongosh.exe'
@@ -382,9 +399,9 @@ do {
     'A' { Start-Flask; Pause }
     'B' { Stop-Flask; Pause }
     'C' { Restart-Flask; Pause }
-    'D' { Start-Mongo | Out-Host; Pause }
-    'E' { Stop-Mongo  | Out-Host; Pause }
-    'F' { Restart-Mongo | Out-Host; Pause }
+    'D' { Start-Mongo; Pause }
+    'E' { Stop-Mongo; Pause }
+    'F' { Restart-Mongo; Pause }
     'G' { Launch-Mongosh }
     'H' { if (-not (Test-Path $Cfg.Caddyfile)) { New-Caddyfile }; Start-Caddy; Pause }
     'I' { Stop-Caddy; Pause }

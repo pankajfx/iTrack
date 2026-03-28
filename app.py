@@ -589,7 +589,7 @@ def api_hierarchy_view():
                 'phone': fe.get('contact'),  # Use 'contact' field from user document
                 'email': fe.get('email'),
                 'location': fe.get('location'),  # State/location
-                'field_support': fe.get('field_support'),
+                'field_support': session.get('field_support'),
                 'total_count': total, 
                 'unassigned_count': pending, 
                 'ongoing_count': ongoing, 

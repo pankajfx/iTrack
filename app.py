@@ -577,13 +577,11 @@ def api_hierarchy_view():
         for fe in fes:
             fe_id = str(fe['_id'])
             base_filter = {'fe.id': fe_id}
-            
-            # Total and pending use created_at
-            total   = mongo.db.trackers.count_documents({**base_filter, **created_date_filter})
+
             pending = mongo.db.trackers.count_documents({**base_filter, 'status': 'waiting_noc_assignment', **created_date_filter})
             ongoing = mongo.db.trackers.count_documents({**base_filter, 'status': {'$nin': ['waiting_noc_assignment', 'installation_complete']}, **created_date_filter})
-            # Completed uses completed_at
             done    = mongo.db.trackers.count_documents({**base_filter, 'status': 'installation_complete', **completed_date_filter})
+            total   = pending + ongoing + done
             
             data.append({
                 'id': fe_id, 
@@ -606,13 +604,11 @@ def api_hierarchy_view():
         for feg in fegs:
             feg_name = feg.get('name')
             base_filter = {'fe.field_engineer_group': feg_name}
-            
-            # Total, pending, ongoing use created_at
-            total   = mongo.db.trackers.count_documents({**base_filter, **created_date_filter})
+
             pending = mongo.db.trackers.count_documents({**base_filter, 'status': 'waiting_noc_assignment', **created_date_filter})
             ongoing = mongo.db.trackers.count_documents({**base_filter, 'status': {'$nin': ['waiting_noc_assignment', 'installation_complete']}, **created_date_filter})
-            # Completed uses completed_at
             done    = mongo.db.trackers.count_documents({**base_filter, 'status': 'installation_complete', **completed_date_filter})
+            total   = pending + ongoing + done
             
             fe_count = mongo.db.users.count_documents({'role': ROLE_FE, 'field_engineer_group': feg_name})
             data.append({
@@ -640,14 +636,12 @@ def api_hierarchy_view():
             if feg_names:
                 # Build base filter with FEG names
                 base_filter = {'fe.field_engineer_group': {'$in': feg_names}}
-                
-                # Total, pending, ongoing use created_at
-                total   = mongo.db.trackers.count_documents({**base_filter, **created_date_filter})
+
                 pending = mongo.db.trackers.count_documents({**base_filter, 'status': 'waiting_noc_assignment', **created_date_filter})
                 ongoing = mongo.db.trackers.count_documents({**base_filter, 'status': {'$nin': ['waiting_noc_assignment', 'installation_complete']}, **created_date_filter})
-                # Completed uses completed_at
                 done    = mongo.db.trackers.count_documents({**base_filter, 'status': 'installation_complete', **completed_date_filter})
-                
+                total   = pending + ongoing + done
+
                 fe_count = mongo.db.users.count_documents({'role': ROLE_FE, 'field_engineer_group': {'$in': feg_names}})
             else:
                 total = pending = ongoing = done = fe_count = 0
@@ -694,13 +688,11 @@ def api_hierarchy_drill_down():
         for feg in fegs:
             feg_name_val = feg.get('name')
             base_filter = {'fe.field_engineer_group': feg_name_val}
-            
-            # Total, pending, ongoing use created_at
-            total   = mongo.db.trackers.count_documents({**base_filter, **created_date_filter})
+
             pending = mongo.db.trackers.count_documents({**base_filter, 'status': 'waiting_noc_assignment', **created_date_filter})
             ongoing = mongo.db.trackers.count_documents({**base_filter, 'status': {'$nin': ['waiting_noc_assignment', 'installation_complete']}, **created_date_filter})
-            # Completed uses completed_at
             done    = mongo.db.trackers.count_documents({**base_filter, 'status': 'installation_complete', **completed_date_filter})
+            total   = pending + ongoing + done
             
             fe_count = mongo.db.users.count_documents({'role': ROLE_FE, 'field_engineer_group': feg_name_val})
             data.append({
@@ -723,27 +715,25 @@ def api_hierarchy_drill_down():
         fes = list(mongo.db.users.find({'role': ROLE_FE, 'field_engineer_group': feg_name}))
         data = []
         for fe in fes:
-            fe_id = str(fe['_id'])
-            base_filter = {'fe.id': fe_id}
-            
-            # Total, pending, ongoing use created_at
-            total   = mongo.db.trackers.count_documents({**base_filter, **created_date_filter})
+            fe_username = fe.get('username')
+            # Match trackers by username (stable; stored on every tracker from session['username'])
+            base_filter = {'fe.username': fe_username}
+
             pending = mongo.db.trackers.count_documents({**base_filter, 'status': 'waiting_noc_assignment', **created_date_filter})
             ongoing = mongo.db.trackers.count_documents({**base_filter, 'status': {'$nin': ['waiting_noc_assignment', 'installation_complete']}, **created_date_filter})
-            # Completed uses completed_at
             done    = mongo.db.trackers.count_documents({**base_filter, 'status': 'installation_complete', **completed_date_filter})
-            
+            total   = pending + ongoing + done
+
             data.append({
-                'id': fe_id, 
-                'name': fe.get('name'), 
-                'phone': fe.get('phone'),
+                'id': str(fe['_id']),
+                'name': fe.get('name'),
+                'phone': fe.get('contact') or fe.get('phone'),
                 'email': fe.get('email'),
                 'region': fe.get('region'),
                 'field_engineer_group': fe.get('field_engineer_group'),
-                'field_support': fe.get('field_support'),
-                'total_count': total, 
-                'unassigned_count': pending, 
-                'ongoing_count': ongoing, 
+                'total_count': total,
+                'unassigned_count': pending,
+                'ongoing_count': ongoing,
                 'completed_count': done
             })
         return jsonify({'success': True, 'type': 'field_engineers', 'data': data, 'total_count': len(data)})
@@ -2875,6 +2865,62 @@ def api_analytics_sim_performance():
             'backgroundColor': ['#22C55E', '#EF4444', '#D1D5DB', '#10B981', '#F97316', '#E5E7EB'],
         }]
     })
+
+
+@app.route('/api/analytics/sim-provider-performance')
+@login_required
+def api_analytics_sim_provider_performance():
+    """SIM activation stats broken down by provider (Airtel, Jio, VI, BSNL)."""
+    if not _analytics_allowed():
+        return jsonify({'error': 'Unauthorized'}), 403
+    range_type = request.args.get('range', 'today')
+    start, end = get_date_range(range_type, request.args.get('from'), request.args.get('to'))
+    date_filter = {'created_at': {'$gte': start, '$lte': end}}
+
+    PROVIDERS = ['Airtel', 'Jio', 'VI', 'BSNL']
+    SUCCESS_STATUSES = ['activation_complete_manual', 'activation_complete_preactivated']
+
+    def agg_by_provider(sim_key):
+        """Return {provider: {total, success, failed}} via a single aggregation."""
+        pipeline = [
+            {'$match': {**date_filter, f'sim.{sim_key}.status': {'$ne': 'not_required'},
+                        f'sim.{sim_key}.provider': {'$in': PROVIDERS}}},
+            {'$group': {
+                '_id': f'$sim.{sim_key}.provider',
+                'total': {'$sum': 1},
+                'success': {'$sum': {'$cond': {
+                    'if': {'$in': [f'$sim.{sim_key}.status', SUCCESS_STATUSES]},
+                    'then': 1, 'else': 0
+                }}},
+                'failed': {'$sum': {'$cond': {
+                    'if': {'$and': [
+                        {'$ne': [f'$sim.{sim_key}.failure_reason', None]},
+                        {'$ne': [f'$sim.{sim_key}.failure_reason', '']}
+                    ]},
+                    'then': 1, 'else': 0
+                }}}
+            }}
+        ]
+        return {row['_id']: row for row in mongo.db.trackers.aggregate(pipeline)}
+
+    sim1_stats = agg_by_provider('sim1')
+    sim2_stats = agg_by_provider('sim2')
+
+    result = {}
+    for p in PROVIDERS:
+        s1 = sim1_stats.get(p, {'total': 0, 'success': 0, 'failed': 0})
+        s2 = sim2_stats.get(p, {'total': 0, 'success': 0, 'failed': 0})
+        total   = s1['total']   + s2['total']
+        success = s1['success'] + s2['success']
+        failed  = s1['failed']  + s2['failed']
+        result[p] = {
+            'total':   total,
+            'success': success,
+            'failed':  failed,
+            'pending': max(0, total - success - failed),
+        }
+
+    return jsonify({'providers': PROVIDERS, 'data': result})
 
 
 @app.route('/api/NOC_SUPPORT_GROUP/fe/day/<date>')

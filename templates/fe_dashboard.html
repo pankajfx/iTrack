@@ -2078,7 +2078,7 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
                         <thead class="bg-gray-100 border-b-2 border-gray-300">
                             <tr>
                                 <th class="px-3 py-2 text-left font-bold text-gray-700">Region Name</th>
-                                <th class="px-3 py-2 text-left font-bold text-gray-700">Code</th>
+                                <th class="px-3 py-2 text-center font-bold text-gray-700">Total</th>
                                 <th class="px-3 py-2 text-center font-bold text-gray-700">Unassigned</th>
                                 <th class="px-3 py-2 text-center font-bold text-gray-700">Ongoing</th>
                                 <th class="px-3 py-2 text-center font-bold text-gray-700">Completed</th>
@@ -2089,10 +2089,11 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
 
             regionStatsData.forEach((region, index) => {
                 const rowClass = index % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+                const total = (region.unassigned_count || 0) + (region.ongoing_count || 0) + (region.completed_count || 0);
                 html += `
                     <tr class="${rowClass} hover:bg-blue-50 transition-colors cursor-pointer" onclick="openRegionFEGDetails('${region.name}')">
                         <td class="px-3 py-2 font-semibold text-blue-600 hover:text-blue-800 underline">${region.name || 'N/A'}</td>
-                        <td class="px-3 py-2 text-gray-700">${region.code || 'N/A'}</td>
+                        <td class="px-3 py-2 text-center font-bold text-gray-900">${total}</td>
                         <td class="px-3 py-2 text-center font-bold text-orange-600">${region.unassigned_count || 0}</td>
                         <td class="px-3 py-2 text-center font-bold text-blue-600">${region.ongoing_count || 0}</td>
                         <td class="px-3 py-2 text-center font-bold text-green-600">${region.completed_count || 0}</td>
@@ -2287,7 +2288,6 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
                                 <th class="px-3 py-2 text-left font-bold text-gray-700 bg-gray-100">Phone</th>
                                 <th class="px-3 py-2 text-left font-bold text-gray-700 bg-gray-100">Email</th>
                                 <th class="px-3 py-2 text-left font-bold text-gray-700 bg-gray-100">Region</th>
-                                <th class="px-3 py-2 text-left font-bold text-gray-700 bg-gray-100">Field Support</th>
                                 <th class="px-3 py-2 text-center font-bold text-gray-700 bg-gray-100">Total</th>
                                 <th class="px-3 py-2 text-center font-bold text-gray-700 bg-gray-100">Unassigned</th>
                                 <th class="px-3 py-2 text-center font-bold text-gray-700 bg-gray-100">Ongoing</th>
@@ -2305,7 +2305,6 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
                         <td class="px-3 py-2 text-gray-700">${fe.phone || 'N/A'}</td>
                         <td class="px-3 py-2 text-gray-700">${fe.email || 'N/A'}</td>
                         <td class="px-3 py-2 text-gray-700">${fe.region || 'N/A'}</td>
-                        <td class="px-3 py-2 text-gray-700">${fe.field_support || 'N/A'}</td>
                         <td class="px-3 py-2 text-center font-bold text-gray-900">${fe.total_count || 0}</td>
                         <td class="px-3 py-2 text-center font-bold text-orange-600">${fe.unassigned_count || 0}</td>
                         <td class="px-3 py-2 text-center font-bold text-blue-600">${fe.ongoing_count || 0}</td>

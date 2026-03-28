@@ -1008,6 +1008,15 @@
             </h3>
             <div class="chart-canvas" style="height: 280px;"><canvas id="sim-perf-chart"></canvas></div>
         </div>
+
+        <!-- SIM Provider Performance Chart -->
+        <div class="chart-container">
+            <h3 class="chart-title mb-4 flex items-center gap-2">
+                <span class="material-symbols-outlined icon-lg text-purple-600">signal_cellular_alt</span>
+                <span>SIM Performance by Provider</span>
+            </h3>
+            <div class="chart-canvas" style="height: 280px;"><canvas id="sim-provider-chart"></canvas></div>
+        </div>
     </div>
 </main>
 
@@ -1016,7 +1025,7 @@ let currentView = 'fe', currentRange = 'today', currentLevel = 0;
 let selectedDay = null, selectedUser = null, selectedUserId = null;
 let customDateFrom = null, customDateTo = null;
 let mainChart = null, trendChart = null, currentChartData = null;
-let stageDurationChart = null, statusDistChart = null, ztpBreakdownChart = null, simPerfChart = null;
+let stageDurationChart = null, statusDistChart = null, ztpBreakdownChart = null, simPerfChart = null, simProviderChart = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     loadAnalytics();
@@ -1104,6 +1113,7 @@ async function loadAnalytics() {
             loadStatusDistChart(),
             loadZTPBreakdownChart(),
             loadSIMPerfChart(),
+            loadSIMProviderChart(),
         ]);
     } catch (error) { console.error('Error:', error); showToast('Failed to load analytics', 'error'); }
     hideLoading();
@@ -1731,6 +1741,52 @@ async function loadSIMPerfChart() {
             }
         });
     } catch (e) { console.error('SIM perf chart error:', e); }
+}
+
+async function loadSIMProviderChart() {
+    try {
+        const data = await (await fetch(`/api/analytics/sim-provider-performance?${getAnalyticsParams()}`)).json();
+        const ctx = document.getElementById('sim-provider-chart');
+        if (!ctx) return;
+        if (simProviderChart) simProviderChart.destroy();
+
+        const providers = data.providers;
+        const success  = providers.map(p => data.data[p].success);
+        const failed   = providers.map(p => data.data[p].failed);
+        const pending  = providers.map(p => data.data[p].pending);
+
+        simProviderChart = new Chart(ctx.getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: providers,
+                datasets: [
+                    { label: 'Success', data: success, backgroundColor: '#22C55E', stack: 'sim' },
+                    { label: 'Failed',  data: failed,  backgroundColor: '#EF4444', stack: 'sim' },
+                    { label: 'Pending', data: pending, backgroundColor: '#D1D5DB', stack: 'sim' },
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'top', labels: { boxWidth: 12 } },
+                    tooltip: {
+                        callbacks: {
+                            afterBody: function(items) {
+                                const p = providers[items[0].dataIndex];
+                                const total = data.data[p].total;
+                                return [`Total SIM slots: ${total}`];
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: { stacked: true, grid: { display: false } },
+                    y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } }
+                }
+            }
+        });
+    } catch (e) { console.error('SIM provider chart error:', e); }
 }
 
 function goBack() {

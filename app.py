@@ -1,7 +1,7 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash, send_file
 from flask_pymongo import PyMongo
 from flask_socketio import SocketIO, emit, join_room, leave_room
-from werkzeug.security import check_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 import os
@@ -2197,14 +2197,6 @@ def api_approve_hso(tracker_id):
                         make_event('installation_complete', 'system', 'system',
                                    'Installation completed successfully'),
                     ]
-                },
-                'hso.attempts': {
-                    'attempt_no': len(tracker.get('hso', {}).get('attempts', [])) + 1,
-                    'submitted_at': None,
-                    'action': 'approved',
-                    'actor_id': session['user_id'],
-                    'actor_role': ROLE_NS,
-                    'reason': None
                 }
             }
         }
@@ -2254,15 +2246,7 @@ def api_reject_hso(tracker_id):
             },
             '$push': {
                 'events': make_event('hso_rejected', session['user_id'], ROLE_NS,
-                                     f'HSO rejected: {reason}', {'reason': reason}),
-                'hso.attempts': {
-                    'attempt_no': len(tracker.get('hso', {}).get('attempts', [])) + 1,
-                    'submitted_at': None,
-                    'action': 'rejected',
-                    'actor_id': session['user_id'],
-                    'actor_role': ROLE_NS,
-                    'reason': reason
-                }
+                                     f'HSO rejected: {reason}', {'reason': reason})
             }
         }
     )
@@ -3177,6 +3161,166 @@ def api_analytics_export_noc():
         return jsonify({'error': 'openpyxl not installed. Run: pip install openpyxl'}), 500
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+# ─── Admin: User Management ─────────────────────────────────────────────────
+# Separate password-gated admin panel for managing users (create / update).
+# Admin session is tracked independently of the regular user session.
+
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'qwerty')
+
+# Role → human label mapping for display
+ROLE_LABELS = {
+    ROLE_FE:        'Field Engineer',
+    ROLE_FEG:       'Field Engineer Group',
+    ROLE_FS:        'Field Support',
+    ROLE_FSG:       'Field Support Group',
+    ROLE_NS:        'NOC Support',
+    ROLE_NSG:       'NOC Support Group',
+    ROLE_ANALYTICS: 'Analytics',
+}
+
+# Fields that are relevant for each role (used by the frontend to show/hide inputs)
+ROLE_FIELDS = {
+    ROLE_FE:  ['name', 'username', 'password', 'zone', 'region', 'state',
+               'field_engineer_group', 'field_support', 'email', 'contact', 'location'],
+    ROLE_FEG: ['name', 'username', 'password', 'zone', 'region', 'state', 'field_support'],
+    ROLE_FS:  ['name', 'username', 'password', 'zone', 'region', 'field_support_group'],
+    ROLE_FSG: ['name', 'username', 'password', 'zone'],
+    ROLE_NS:  ['name', 'username', 'password'],
+    ROLE_NSG: ['name', 'username', 'password'],
+    ROLE_ANALYTICS: ['name', 'username', 'password'],
+}
+
+
+def admin_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('admin_authenticated'):
+            return jsonify({'error': 'Admin authentication required'}), 403
+        return f(*args, **kwargs)
+    return decorated
+
+
+@app.route('/admin')
+def admin_page():
+    return render_template('admin_users.html',
+                           role_labels=ROLE_LABELS,
+                           role_fields=ROLE_FIELDS,
+                           all_roles=list(ROLE_LABELS.keys()))
+
+
+@app.route('/admin/auth', methods=['POST'])
+def admin_auth():
+    data = request.json or {}
+    if data.get('password') == ADMIN_PASSWORD:
+        session['admin_authenticated'] = True
+        return jsonify({'success': True})
+    return jsonify({'success': False, 'error': 'Incorrect password'}), 401
+
+
+@app.route('/admin/logout', methods=['POST'])
+def admin_logout():
+    session.pop('admin_authenticated', None)
+    return jsonify({'success': True})
+
+
+@app.route('/admin/api/users', methods=['GET'])
+@admin_required
+def admin_list_users():
+    users = list(mongo.db.users.find({}, {'password': 0}))
+    for u in users:
+        u['_id'] = str(u['_id'])
+    return jsonify(users)
+
+
+@app.route('/admin/api/users', methods=['POST'])
+@admin_required
+def admin_create_user():
+    data = request.json or {}
+    role = data.get('role')
+    if role not in ROLE_LABELS:
+        return jsonify({'error': 'Invalid role'}), 400
+
+    name = (data.get('name') or '').strip()
+    username = (data.get('username') or '').strip()
+    password = data.get('password', '')
+
+    if not name:
+        return jsonify({'error': 'Name is required'}), 400
+    if not password:
+        return jsonify({'error': 'Password is required'}), 400
+
+    # username defaults to name if not provided
+    if not username:
+        username = name
+
+    # Prevent duplicate usernames
+    if mongo.db.users.find_one({'username': username}):
+        return jsonify({'error': f'Username "{username}" already exists'}), 409
+
+    doc = {
+        'name':     name,
+        'username': username,
+        'password': generate_password_hash(password),
+        'role':     role,
+        'created_at': get_utc_now(),
+    }
+    # Optional role-specific fields
+    for field in ['zone', 'region', 'state', 'field_engineer_group', 'field_support',
+                  'field_support_group', 'email', 'contact', 'location']:
+        val = (data.get(field) or '').strip()
+        if val:
+            doc[field] = val
+
+    result = mongo.db.users.insert_one(doc)
+    return jsonify({'success': True, 'id': str(result.inserted_id)}), 201
+
+
+@app.route('/admin/api/users/<user_id>', methods=['PUT'])
+@admin_required
+def admin_update_user(user_id):
+    data = request.json or {}
+    try:
+        oid = ObjectId(user_id)
+    except Exception:
+        return jsonify({'error': 'Invalid user ID'}), 400
+
+    user = mongo.db.users.find_one({'_id': oid})
+    if not user:
+        return jsonify({'error': 'User not found'}), 404
+
+    set_ops = {}
+
+    # Name
+    name = (data.get('name') or '').strip()
+    if name:
+        set_ops['name'] = name
+
+    # Username — check uniqueness if changed
+    username = (data.get('username') or '').strip()
+    if username and username != user.get('username'):
+        if mongo.db.users.find_one({'username': username, '_id': {'$ne': oid}}):
+            return jsonify({'error': f'Username "{username}" already exists'}), 409
+        set_ops['username'] = username
+
+    # Password — only update if provided
+    password = data.get('password', '')
+    if password:
+        set_ops['password'] = generate_password_hash(password)
+
+    # Optional fields
+    for field in ['zone', 'region', 'state', 'field_engineer_group', 'field_support',
+                  'field_support_group', 'email', 'contact', 'location']:
+        if field in data:
+            set_ops[field] = (data[field] or '').strip()
+
+    if not set_ops:
+        return jsonify({'error': 'No changes provided'}), 400
+
+    set_ops['updated_at'] = get_utc_now()
+    mongo.db.users.update_one({'_id': oid}, {'$set': set_ops})
+    return jsonify({'success': True})
 
 
 # ─── Socket.IO Event Handlers ───────────────────────────────────────────────

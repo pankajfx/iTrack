@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin — User Management</title>
+    <link rel="stylesheet" href="/static/css/output.css">
+    <link rel="stylesheet" href="/static/css/fonts.css">
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .field-row { display: none; }
+        .field-row.visible { display: contents; }
+        input, select { outline: none; }
+        input:focus, select:focus { ring: 2px; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+            text-transform: uppercase;
+        }
+        .modal-overlay {
+            position: fixed; inset: 0;
+            background: rgba(0,0,0,0.45);
+            z-index: 50;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .modal-box {
+            background: white;
+            border-radius: 12px;
+            width: 540px;
+            max-width: 96vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .pw-gate {
+            position: fixed; inset: 0;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a5f 100%);
+            z-index: 100;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .pw-card {
+            background: rgba(255,255,255,0.07);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255,255,255,0.13);
+            border-radius: 16px;
+            padding: 2.5rem 2rem;
+            width: 360px;
+            max-width: 95vw;
+        }
+        #pw-input {
+            width: 100%;
+            background: #1e293b;
+            border: 1px solid #475569;
+            color: #f1f5f9;
+            border-radius: 8px;
+            padding: 10px 12px;
+            font-size: 14px;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+        #pw-input::placeholder { color: #64748b; }
+        #pw-input:focus { border-color: #14b8a6; outline: none; background: #1e3a5f; }
+        #pw-btn {
+            width: 100%;
+            background: #14b8a6;
+            color: white;
+            font-weight: 600;
+            border: none;
+            border-radius: 8px;
+            padding: 11px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        #pw-btn:hover { background: #0d9488; }
+        #pw-btn:disabled { background: #6b7280; cursor: not-allowed; }
+        .spin { animation: spin 0.7s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        tr:hover td { background: #f8fafc; }
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<!-- ── Password Gate ──────────────────────────────────────────────────────── -->
+<div class="pw-gate" id="pw-gate">
+    <div class="pw-card">
+        <div class="text-center mb-6">
+            <span class="material-symbols-outlined text-teal-400" style="font-size:48px">admin_panel_settings</span>
+            <h1 class="text-white text-xl font-bold mt-2">Admin Access</h1>
+            <p class="text-gray-400 text-sm mt-1">User Management Portal</p>
+        </div>
+        <div class="mb-4">
+            <label class="text-gray-300 text-xs font-semibold mb-1 block">Admin Password</label>
+            <input id="pw-input" type="password" placeholder="Enter password"
+                   onkeydown="if(event.key==='Enter') submitPw()">
+        </div>
+        <div id="pw-error" style="color:#f87171;font-size:12px;margin-bottom:8px;display:none;">Incorrect password. Try again.</div>
+        <div id="pw-generic-error" style="color:#f87171;font-size:12px;margin-bottom:8px;display:none;"></div>
+        <button id="pw-btn" onclick="submitPw()">Authenticate</button>
+    </div>
+</div>
+
+<!-- ── Main Page ──────────────────────────────────────────────────────────── -->
+<div id="main-page" class="hidden min-h-screen">
+
+    <!-- Header -->
+    <div class="bg-gray-900 text-white px-6 py-4 flex items-center justify-between shadow">
+        <div class="flex items-center gap-3">
+            <span class="material-symbols-outlined text-teal-400">manage_accounts</span>
+            <div>
+                <h1 class="font-bold text-base leading-tight">User Management</h1>
+                <p class="text-gray-400 text-xs">SD-WAN Tracker · Admin</p>
+            </div>
+        </div>
+        <div class="flex items-center gap-3">
+            <button onclick="openAdd()"
+                    class="flex items-center gap-1.5 bg-teal-500 hover:bg-teal-400 text-white text-sm font-semibold px-3 py-2 rounded-lg transition">
+                <span class="material-symbols-outlined" style="font-size:18px">person_add</span>
+                Add User
+            </button>
+            <button onclick="adminLogout()"
+                    class="flex items-center gap-1.5 text-gray-400 hover:text-red-400 text-sm px-2 py-2 rounded-lg transition">
+                <span class="material-symbols-outlined" style="font-size:18px">logout</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="bg-white border-b px-6 py-3 flex items-center gap-4 flex-wrap">
+        <div class="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-1.5 flex-1 min-w-48 max-w-sm">
+            <span class="material-symbols-outlined text-gray-400" style="font-size:18px">search</span>
+            <input id="search-input" type="text" placeholder="Search name or username…"
+                   class="bg-transparent text-sm text-gray-700 w-full" oninput="filterTable()">
+        </div>
+        <select id="role-filter" class="bg-gray-100 text-sm text-gray-700 rounded-lg px-3 py-1.5 border-0" onchange="filterTable()">
+            <option value="">All Roles</option>
+            {% for role, label in role_labels.items() %}
+            <option value="{{ role }}">{{ label }}</option>
+            {% endfor %}
+        </select>
+        <span id="user-count" class="text-xs text-gray-500 ml-auto"></span>
+    </div>
+
+    <!-- Table -->
+    <div class="px-6 py-4">
+        <div class="bg-white rounded-xl shadow overflow-hidden">
+            <table class="w-full text-sm" id="users-table">
+                <thead>
+                    <tr class="bg-gray-50 border-b text-left">
+                        <th class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Name</th>
+                        <th class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Username</th>
+                        <th class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Role</th>
+                        <th class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Zone / Region</th>
+                        <th class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Group / Parent</th>
+                        <th class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">Contact</th>
+                        <th class="px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide w-12"></th>
+                    </tr>
+                </thead>
+                <tbody id="users-tbody">
+                    <tr><td colspan="7" class="px-4 py-8 text-center text-gray-400 text-sm">
+                        <div class="spin inline-block w-5 h-5 border-2 border-teal-500 border-t-transparent rounded-full"></div>
+                    </td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ── Add / Edit Modal ───────────────────────────────────────────────────── -->
+<div class="modal-overlay hidden" id="user-modal" onclick="if(event.target===this)closeModal()">
+    <div class="modal-box">
+        <div class="flex items-center justify-between px-5 py-4 border-b">
+            <h2 class="font-bold text-gray-800 text-base" id="modal-title">Add User</h2>
+            <button onclick="closeModal()" class="text-gray-400 hover:text-gray-600 transition">
+                <span class="material-symbols-outlined">close</span>
+            </button>
+        </div>
+
+        <form id="user-form" class="px-5 py-4 space-y-3" onsubmit="submitUser(event)">
+            <input type="hidden" id="edit-user-id">
+
+            <!-- Role -->
+            <div>
+                <label class="block text-xs font-semibold text-gray-600 mb-1">Role <span class="text-red-500">*</span></label>
+                <select id="f-role" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500"
+                        onchange="onRoleChange()" required>
+                    <option value="">Select role…</option>
+                    {% for role, label in role_labels.items() %}
+                    <option value="{{ role }}">{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Two-column grid for fields -->
+            <div class="grid grid-cols-2 gap-3" id="field-grid">
+
+                <!-- Name -->
+                <div class="col-span-2 field-row" id="row-name">
+                    <div class="col-span-2">
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Name <span class="text-red-500">*</span></label>
+                        <input id="f-name" type="text" placeholder="Full name"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Username -->
+                <div class="field-row" id="row-username">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Username</label>
+                        <input id="f-username" type="text" placeholder="Defaults to name"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Password -->
+                <div class="field-row" id="row-password">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">
+                            Password <span class="text-red-500" id="pw-required-star">*</span>
+                        </label>
+                        <div class="flex gap-1">
+                            <input id="f-password" type="text" placeholder="Set password"
+                                   class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500 font-mono">
+                            <button type="button" onclick="generatePassword()"
+                                    title="Generate password"
+                                    class="border border-gray-300 rounded-lg px-2 py-2 text-gray-500 hover:border-teal-400 hover:text-teal-600 transition text-xs">
+                                <span class="material-symbols-outlined" style="font-size:16px">casino</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Zone -->
+                <div class="field-row" id="row-zone">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Zone</label>
+                        <input id="f-zone" type="text" placeholder="e.g. India"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Region -->
+                <div class="field-row" id="row-region">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Region</label>
+                        <input id="f-region" type="text" placeholder="e.g. South 1"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- State -->
+                <div class="field-row" id="row-state">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">State</label>
+                        <input id="f-state" type="text" placeholder="e.g. Andhra Pradesh"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Field Engineer Group -->
+                <div class="field-row" id="row-field_engineer_group">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">FE Group (FEG)</label>
+                        <input id="f-field_engineer_group" type="text" placeholder="Group name"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Field Support -->
+                <div class="field-row" id="row-field_support">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Field Support (FS)</label>
+                        <input id="f-field_support" type="text" placeholder="FS name"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Field Support Group -->
+                <div class="field-row" id="row-field_support_group">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Field Support Group (FSG)</label>
+                        <input id="f-field_support_group" type="text" placeholder="FSG name"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Email -->
+                <div class="field-row" id="row-email">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Email</label>
+                        <input id="f-email" type="email" placeholder="user@example.com"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Contact -->
+                <div class="field-row" id="row-contact">
+                    <div>
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Contact</label>
+                        <input id="f-contact" type="text" placeholder="Phone number"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+
+                <!-- Location -->
+                <div class="field-row col-span-2" id="row-location">
+                    <div class="col-span-2">
+                        <label class="block text-xs font-semibold text-gray-600 mb-1">Location</label>
+                        <input id="f-location" type="text" placeholder="City / Site"
+                               class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:border-teal-500">
+                    </div>
+                </div>
+            </div>
+
+            <div id="form-error" class="text-red-500 text-xs hidden"></div>
+
+            <div class="flex justify-end gap-2 pt-2 border-t">
+                <button type="button" onclick="closeModal()"
+                        class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium transition">
+                    Cancel
+                </button>
+                <button type="submit" id="submit-btn"
+                        class="px-5 py-2 bg-teal-500 hover:bg-teal-400 text-white text-sm font-semibold rounded-lg transition">
+                    Save
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────────────────────────── -->
+<div id="toast" class="fixed top-4 right-4 z-[200] hidden px-4 py-3 rounded-xl text-white text-sm font-medium shadow-lg flex items-center gap-2 transition-all"></div>
+
+<script>
+// ── Data ────────────────────────────────────────────────────────────────────
+const ROLE_LABELS = {{ role_labels | tojson }};
+const ROLE_FIELDS = {{ role_fields | tojson }};
+
+// All optional text fields handled in the form
+const ALL_FIELDS = ['name','username','password','zone','region','state',
+                    'field_engineer_group','field_support','field_support_group',
+                    'email','contact','location'];
+
+// Role badge colours
+const ROLE_COLORS = {
+    FIELD_ENGINEER:        'bg-blue-100 text-blue-700',
+    FIELD_ENGINEER_GROUP:  'bg-indigo-100 text-indigo-700',
+    FIELD_SUPPORT:         'bg-violet-100 text-violet-700',
+    FIELD_SUPPORT_GROUP:   'bg-purple-100 text-purple-700',
+    NOC_SUPPORT:           'bg-orange-100 text-orange-700',
+    NOC_SUPPORT_GROUP:     'bg-amber-100 text-amber-700',
+    ANALYTICS:             'bg-emerald-100 text-emerald-700',
+};
+
+let allUsers = [];
+
+// ── Auth ────────────────────────────────────────────────────────────────────
+async function submitPw() {
+    const pw  = document.getElementById('pw-input').value;
+    const err = document.getElementById('pw-error');
+    const gen = document.getElementById('pw-generic-error');
+    const btn = document.getElementById('pw-btn');
+
+    err.style.display = 'none';
+    gen.style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Checking…';
+
+    try {
+        const r = await fetch('/admin/auth', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({password: pw})
+        });
+        if (r.ok) {
+            document.getElementById('pw-gate').style.display = 'none';
+            document.getElementById('main-page').classList.remove('hidden');
+            loadUsers();
+        } else {
+            err.style.display = 'block';
+            document.getElementById('pw-input').value = '';
+            document.getElementById('pw-input').focus();
+        }
+    } catch (e) {
+        gen.textContent = 'Could not reach server. Is the app running?';
+        gen.style.display = 'block';
+        console.error('Admin auth error:', e);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Authenticate';
+    }
+}
+
+async function adminLogout() {
+    await fetch('/admin/logout', {method:'POST'});
+    location.reload();
+}
+
+// ── Users ────────────────────────────────────────────────────────────────────
+async function loadUsers() {
+    const r = await fetch('/admin/api/users');
+    if (r.status === 403) { location.reload(); return; }
+    allUsers = await r.json();
+    renderTable(allUsers);
+}
+
+function renderTable(users) {
+    const tbody = document.getElementById('users-tbody');
+    document.getElementById('user-count').textContent = `${users.length} user${users.length !== 1 ? 's' : ''}`;
+
+    if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="px-4 py-8 text-center text-gray-400 text-sm">No users found.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = users.map(u => {
+        const label  = ROLE_LABELS[u.role] || u.role;
+        const colors = ROLE_COLORS[u.role] || 'bg-gray-100 text-gray-600';
+        const zoneRegion = [u.zone, u.region].filter(Boolean).join(' / ') || '—';
+        const group = u.field_engineer_group || u.field_support || u.field_support_group || '—';
+        const contact = u.email
+            ? `<div class="text-gray-700">${u.email}</div>${u.contact ? `<div class="text-gray-400">${u.contact}</div>` : ''}`
+            : (u.contact || '—');
+        return `<tr data-id="${u._id}" data-role="${u.role}" data-name="${(u.name||'').toLowerCase()}" data-username="${(u.username||'').toLowerCase()}">
+            <td class="px-4 py-3 font-medium text-gray-800">${u.name || '—'}</td>
+            <td class="px-4 py-3 text-gray-500 font-mono text-xs">${u.username || '—'}</td>
+            <td class="px-4 py-3"><span class="badge ${colors}">${label}</span></td>
+            <td class="px-4 py-3 text-gray-500 text-xs">${zoneRegion}</td>
+            <td class="px-4 py-3 text-gray-500 text-xs">${group}</td>
+            <td class="px-4 py-3 text-gray-500 text-xs">${contact}</td>
+            <td class="px-4 py-3">
+                <button onclick='openEdit(${JSON.stringify(u)})'
+                        class="text-gray-400 hover:text-teal-600 transition p-1 rounded">
+                    <span class="material-symbols-outlined" style="font-size:18px">edit</span>
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+function filterTable() {
+    const q    = document.getElementById('search-input').value.toLowerCase();
+    const role = document.getElementById('role-filter').value;
+    const filtered = allUsers.filter(u => {
+        const matchRole = !role || u.role === role;
+        const matchQ    = !q
+            || (u.name || '').toLowerCase().includes(q)
+            || (u.username || '').toLowerCase().includes(q)
+            || (u.email || '').toLowerCase().includes(q);
+        return matchRole && matchQ;
+    });
+    renderTable(filtered);
+}
+
+// ── Modal ────────────────────────────────────────────────────────────────────
+function openAdd() {
+    document.getElementById('modal-title').textContent = 'Add User';
+    document.getElementById('edit-user-id').value = '';
+    document.getElementById('pw-required-star').style.display = '';
+    document.getElementById('user-form').reset();
+    hideFormError();
+    onRoleChange();
+    document.getElementById('user-modal').classList.remove('hidden');
+    document.getElementById('f-role').focus();
+}
+
+function openEdit(u) {
+    document.getElementById('modal-title').textContent = 'Edit User';
+    document.getElementById('edit-user-id').value = u._id;
+    document.getElementById('pw-required-star').style.display = 'none';
+    hideFormError();
+
+    // Populate role first so fields show
+    document.getElementById('f-role').value = u.role;
+    document.getElementById('f-role').disabled = true;
+    onRoleChange();
+
+    // Fill fields
+    for (const f of ALL_FIELDS) {
+        const el = document.getElementById('f-' + f);
+        if (el && f !== 'password') el.value = u[f] || '';
+    }
+    document.getElementById('f-password').value = '';
+    document.getElementById('f-password').placeholder = 'Leave blank to keep current';
+
+    document.getElementById('user-modal').classList.remove('hidden');
+}
+
+function closeModal() {
+    document.getElementById('user-modal').classList.add('hidden');
+    document.getElementById('f-role').disabled = false;
+}
+
+// ── Role → visible fields ────────────────────────────────────────────────────
+function onRoleChange() {
+    const role   = document.getElementById('f-role').value;
+    const fields = ROLE_FIELDS[role] || [];
+
+    for (const f of ALL_FIELDS) {
+        const row = document.getElementById('row-' + f);
+        if (!row) continue;
+        if (fields.includes(f)) {
+            row.classList.add('visible');
+            // Required flag for name
+            const inp = document.getElementById('f-' + f);
+            if (inp && f === 'name') inp.required = true;
+        } else {
+            row.classList.remove('visible');
+            const inp = document.getElementById('f-' + f);
+            if (inp) { inp.required = false; inp.value = ''; }
+        }
+    }
+}
+
+// ── Password generator ───────────────────────────────────────────────────────
+function generatePassword() {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
+    let pw = '';
+    const arr = new Uint8Array(10);
+    crypto.getRandomValues(arr);
+    for (const b of arr) pw += chars[b % chars.length];
+    document.getElementById('f-password').value = pw;
+    document.getElementById('f-password').select();
+}
+
+// ── Submit ───────────────────────────────────────────────────────────────────
+async function submitUser(e) {
+    e.preventDefault();
+    hideFormError();
+
+    const id   = document.getElementById('edit-user-id').value;
+    const role = document.getElementById('f-role').value;
+    const isEdit = !!id;
+
+    // Collect only visible fields
+    const fields = ROLE_FIELDS[role] || [];
+    const payload = { role };
+    for (const f of fields) {
+        const el = document.getElementById('f-' + f);
+        if (el) payload[f] = el.value.trim();
+    }
+
+    // Validate
+    if (!payload.name) { showFormError('Name is required.'); return; }
+    if (!isEdit && !payload.password) { showFormError('Password is required.'); return; }
+
+    const btn = document.getElementById('submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Saving…';
+
+    const url    = isEdit ? `/admin/api/users/${id}` : '/admin/api/users';
+    const method = isEdit ? 'PUT' : 'POST';
+
+    try {
+        const r = await fetch(url, {
+            method,
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify(payload)
+        });
+        const data = await r.json();
+        if (r.ok) {
+            closeModal();
+            toast(isEdit ? 'User updated.' : 'User created.', 'success');
+            await loadUsers();
+        } else {
+            showFormError(data.error || 'Something went wrong.');
+        }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Save';
+    }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function showFormError(msg) {
+    const el = document.getElementById('form-error');
+    el.textContent = msg;
+    el.classList.remove('hidden');
+}
+function hideFormError() {
+    document.getElementById('form-error').classList.add('hidden');
+}
+
+function toast(msg, type = 'info') {
+    const el  = document.getElementById('toast');
+    const bg  = {success:'bg-green-500', error:'bg-red-500', info:'bg-blue-500'}[type] || 'bg-gray-700';
+    const ico = {success:'check_circle', error:'error', info:'info'}[type] || 'info';
+    el.className = `fixed top-4 right-4 z-[200] px-4 py-3 rounded-xl text-white text-sm font-medium shadow-lg flex items-center gap-2 ${bg}`;
+    el.innerHTML = `<span class="material-symbols-outlined" style="font-size:18px">${ico}</span>${msg}`;
+    el.classList.remove('hidden');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+// Enter key on password gate
+document.getElementById('pw-input').focus();
+</script>
+
+<!-- Material Symbols -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=swap">
+<style>
+.material-symbols-outlined {
+    font-family: 'Material Symbols Outlined';
+    font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+    vertical-align: middle;
+    font-style: normal;
+    font-weight: normal;
+    line-height: 1;
+    display: inline-block;
+}
+</style>
+</body>
+</html>

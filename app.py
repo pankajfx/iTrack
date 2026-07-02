@@ -2463,6 +2463,28 @@ def api_mark_messages_read(tracker_id):
 
 
 # ─── Analytics / KPI APIs ───────────────────────────────────────────────────
+
+# Categorical palette (fixed order — see dataviz skill palette.md)
+CHART_CATEGORICAL = ['#2a78d6', '#1baf7a', '#eda100', '#008300',
+                      '#4a3aa7', '#e34948', '#e87ba4', '#eb6834']
+# Status palette (reserved semantics — never reused as a plain series color)
+CHART_STATUS_GOOD     = '#0ca30c'
+CHART_STATUS_WARNING  = '#fab219'
+CHART_STATUS_SERIOUS  = '#ec835a'
+CHART_STATUS_CRITICAL = '#d03b3b'
+CHART_MUTED = '#c3c2b7'
+
+
+def _lighten_hex(hex_color, factor=0.35):
+    """Mix a hex color toward white by `factor` (0-1) for a lighter tint."""
+    hex_color = hex_color.lstrip('#')
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (0, 2, 4))
+    r = round(r + (255 - r) * factor)
+    g = round(g + (255 - g) * factor)
+    b = round(b + (255 - b) * factor)
+    return f'#{r:02x}{g:02x}{b:02x}'
+
+
 def get_date_range(range_type, custom_from=None, custom_to=None):
     now = get_utc_now()
     if range_type == 'today':
@@ -2475,6 +2497,8 @@ def get_date_range(range_type, custom_from=None, custom_to=None):
         return (now - timedelta(days=7)).replace(hour=0, minute=0, second=0, microsecond=0), now
     elif range_type == 'lastmonth':
         return (now - timedelta(days=30)).replace(hour=0, minute=0, second=0, microsecond=0), now
+    elif range_type == 'alltime':
+        return datetime(2000, 1, 1), now
     elif range_type == 'custom' and custom_from and custom_to:
         return (datetime.fromisoformat(custom_from.replace('Z', '+00:00')).replace(tzinfo=None),
                 datetime.fromisoformat(custom_to.replace('Z', '+00:00')).replace(tzinfo=None))
@@ -2631,16 +2655,34 @@ def api_analytics_fe_overview():
 
     sorted_days = sorted(day_data.keys())
     fe_accounts = sorted(fe_accounts)
-    colors = ['#3B82F6','#10B981','#F59E0B','#EF4444','#8B5CF6','#EC4899']
+
+    # Cap to the busiest accounts so the chart stays readable on wide ranges
+    # (e.g. "All Time" can span 100+ distinct FE accounts) — fold the long
+    # tail into "Other" instead of rendering one stack per account, which
+    # made every bar sub-pixel wide and the chart look empty.
+    totals = {fe: sum(day_data[d].get(fe, {}).get('started', 0) for d in sorted_days) for fe in fe_accounts}
+    top_accounts = sorted(sorted(fe_accounts, key=lambda fe: totals[fe], reverse=True)[:8])
+    top_set = set(top_accounts)
+    other_accounts = [fe for fe in fe_accounts if fe not in top_set]
+    display_accounts = top_accounts + (['Other'] if other_accounts else [])
+
+    def _bucket_stats(day, fe_list):
+        started = sum(day_data[day].get(fe, {}).get('started', 0) for fe in fe_list)
+        completed = sum(day_data[day].get(fe, {}).get('completed', 0) for fe in fe_list)
+        return started, completed
+
+    colors = CHART_CATEGORICAL
     datasets = []
-    for i, fe in enumerate(fe_accounts):
+    for i, fe in enumerate(display_accounts):
+        base_color = colors[i % len(colors)]
+        fe_list = other_accounts if fe == 'Other' else [fe]
+        stats = [_bucket_stats(d, fe_list) for d in sorted_days]
         datasets.append({'label': f'{fe} - Completed',
-                         'data': [day_data[d].get(fe, {'completed':0})['completed'] for d in sorted_days],
-                         'backgroundColor': colors[i % len(colors)], 'stack': fe})
+                         'data': [c for (_, c) in stats],
+                         'backgroundColor': base_color, 'stack': fe})
         datasets.append({'label': f'{fe} - In Progress',
-                         'data': [day_data[d].get(fe, {'started':0,'completed':0})['started'] -
-                                  day_data[d].get(fe, {'started':0,'completed':0})['completed'] for d in sorted_days],
-                         'backgroundColor': '#' + hex(int(colors[i % len(colors)][1:], 16) + 0x333333)[2:].zfill(6),
+                         'data': [s - c for (s, c) in stats],
+                         'backgroundColor': _lighten_hex(base_color, 0.45),
                          'stack': fe})
     return jsonify({'labels': sorted_days, 'datasets': datasets})
 
@@ -2668,9 +2710,9 @@ def api_analytics_noc_overview():
         'labels': sorted_days,
         'datasets': [
             {'label': 'Completed',  'data': [day_data[d]['completed'] for d in sorted_days],
-             'backgroundColor': '#10B981', 'stack': 'total'},
+             'backgroundColor': CHART_STATUS_GOOD, 'stack': 'total'},
             {'label': 'In Progress','data': [day_data[d]['started'] - day_data[d]['completed'] for d in sorted_days],
-             'backgroundColor': '#F59E0B', 'stack': 'total'},
+             'backgroundColor': CHART_STATUS_WARNING, 'stack': 'total'},
         ]
     })
 
@@ -2699,13 +2741,13 @@ def api_analytics_trend():
         'labels': sorted_days,
         'datasets': [
             {'label': 'Started',   'data': [day_data[d]['started'] for d in sorted_days],
-             'type': 'bar', 'backgroundColor': '#3B82F6', 'yAxisID': 'y'},
+             'type': 'bar', 'backgroundColor': CHART_CATEGORICAL[0], 'yAxisID': 'y'},
             {'label': 'Completed', 'data': [day_data[d]['completed'] for d in sorted_days],
-             'type': 'bar', 'backgroundColor': '#10B981', 'yAxisID': 'y'},
+             'type': 'bar', 'backgroundColor': CHART_STATUS_GOOD, 'yAxisID': 'y'},
             {'label': 'Avg Completion (h)',
              'data': [round(sum(day_data[d]['times'])/len(day_data[d]['times']), 2)
                       if day_data[d]['times'] else 0 for d in sorted_days],
-             'type': 'line', 'borderColor': '#F59E0B', 'backgroundColor': 'transparent',
+             'type': 'line', 'borderColor': CHART_CATEGORICAL[7], 'backgroundColor': 'transparent',
              'yAxisID': 'y1', 'tension': 0.4},
         ]
     })
@@ -2742,7 +2784,8 @@ def api_analytics_stage_durations():
 
     labels = list(stage_totals.keys())
     values = [_avg(stage_totals[l]) for l in labels]
-    colors = ['#6366F1', '#3B82F6', '#0EA5E9', '#14B8A6', '#22C55E', '#F59E0B', '#EF4444']
+    # Ordinal ramp (pipeline progresses stage-by-stage) — single hue, light -> dark
+    colors = ['#9ec5f4', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6', '#1c5cab', '#104281']
 
     return jsonify({
         'labels': labels,
@@ -2781,8 +2824,8 @@ def api_analytics_status_distribution():
         STATUS_HSO_REJECTED: 'HSO Rejected',
         STATUS_COMPLETE: 'Completed',
     }
-    colors = ['#EF4444','#F59E0B','#6366F1','#EC4899','#3B82F6','#8B5CF6',
-              '#0EA5E9','#14B8A6','#22C55E','#84CC16','#F97316','#10B981']
+    colors = CHART_CATEGORICAL + [CHART_STATUS_WARNING, CHART_STATUS_SERIOUS,
+                                   CHART_STATUS_CRITICAL, CHART_STATUS_GOOD]
 
     labels = [status_labels.get(r['_id'], r['_id']) for r in results]
     values = [r['count'] for r in results]
@@ -2814,7 +2857,7 @@ def api_analytics_ztp_breakdown():
         'labels': ['ZTP by FE', 'ZTP by NOC', 'Pending'],
         'datasets': [{
             'data': [by_fe, by_ns, pending],
-            'backgroundColor': ['#3B82F6', '#8B5CF6', '#D1D5DB'],
+            'backgroundColor': [CHART_CATEGORICAL[0], CHART_CATEGORICAL[4], CHART_MUTED],
         }]
     })
 
@@ -2846,7 +2889,8 @@ def api_analytics_sim_performance():
         'datasets': [{
             'label': 'SIM Performance',
             'data': [sim1_ok, sim1_fail, sim1_pending, sim2_ok, sim2_fail, sim2_pending],
-            'backgroundColor': ['#22C55E', '#EF4444', '#D1D5DB', '#10B981', '#F97316', '#E5E7EB'],
+            'backgroundColor': [CHART_STATUS_GOOD, CHART_STATUS_CRITICAL, CHART_MUTED,
+                                 CHART_STATUS_GOOD, CHART_STATUS_CRITICAL, CHART_MUTED],
         }]
     })
 
@@ -2981,8 +3025,8 @@ def api_analytics_noc_day(date):
         'labels': noc_labels,
         'noc_ids': noc_ids,
         'datasets': [
-            {'label': 'Started',   'data': [noc_data[k]['started']   for k in keys], 'backgroundColor': '#3B82F6'},
-            {'label': 'Completed', 'data': [noc_data[k]['completed'] for k in keys], 'backgroundColor': '#10B981'},
+            {'label': 'Started',   'data': [noc_data[k]['started']   for k in keys], 'backgroundColor': CHART_CATEGORICAL[0]},
+            {'label': 'Completed', 'data': [noc_data[k]['completed'] for k in keys], 'backgroundColor': CHART_STATUS_GOOD},
         ]
     })
 

@@ -182,15 +182,30 @@
     .kpi-card {
         display: flex;
         align-items: center;
-        gap: 0.62rem;
+        gap: 0.65rem;
         background: linear-gradient(145deg, #ffffff, #f8fafc);
         border-radius: 12px;
-        padding: 0.62rem 0.66rem;
+        padding: 0.7rem 0.8rem;
+        min-height: 4rem;
         box-shadow: 0 8px 20px -18px rgba(15, 23, 42, 0.75), inset 0 1px 0 rgba(255, 255, 255, 0.8);
         border: 1px solid var(--border);
         transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
         position: relative;
         overflow: hidden;
+    }
+
+    .kpi-card-plain {
+        min-height: 3.75rem;
+        justify-content: center;
+        text-align: center;
+    }
+
+    .kpi-card-plain .kpi-label {
+        font-size: 0.64rem;
+    }
+
+    .kpi-card-plain .kpi-value {
+        font-size: 0.98rem;
     }
 
     .kpi-card::before {
@@ -230,12 +245,34 @@
     .kpi-strip {
         display: grid;
         grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.6rem;
+    }
+
+    @media (min-width: 640px) {
+        .kpi-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+
+    @media (min-width: 1024px) {
+        .kpi-strip { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+    }
+
+    .kpi-strip-sm {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
         gap: 0.55rem;
     }
 
+    @media (min-width: 640px) {
+        .kpi-strip-sm { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    }
+
+    @media (min-width: 1024px) {
+        .kpi-strip-sm { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+    }
+
     .kpi-icon {
-        width: 2.2rem;
-        height: 2.2rem;
+        width: 2.3rem;
+        height: 2.3rem;
         border-radius: 10px;
         display: flex;
         align-items: center;
@@ -253,24 +290,24 @@
     .kpi-icon-orange { background: rgba(249, 115, 22, 0.15); color: #ea580c; }
 
     .kpi-label {
-        font-size: 0.63rem;
+        font-size: 0.7rem;
         font-weight: 700;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.05em;
         color: #64748b;
         margin: 0;
-        line-height: 1.15;
-        white-space: nowrap;
+        line-height: 1.25;
+        white-space: normal;
+        overflow-wrap: break-word;
     }
 
     .kpi-value {
-        margin-top: 0.14rem;
-        font-size: 1.05rem;
+        margin-top: 0.18rem;
+        font-size: 1.2rem;
         font-weight: 800;
-        line-height: 1;
-        white-space: nowrap;
-        text-overflow: ellipsis;
-        overflow: hidden;
+        line-height: 1.15;
+        white-space: normal;
+        overflow-wrap: break-word;
     }
 
     .chart-container {
@@ -372,7 +409,7 @@
 
     .chart-canvas {
         position: relative;
-        height: 355px;
+        height: 178px;
         cursor: pointer;
     }
 
@@ -510,27 +547,28 @@
     }
 
     #custom-range-picker {
-        margin-top: 0.65rem;
-        padding: 0.8rem;
-        border-radius: 12px;
+        margin-top: 0.5rem;
+        padding: 0.55rem 0.6rem;
+        border-radius: 11px;
         background: linear-gradient(145deg, rgba(236, 254, 255, 0.9), rgba(240, 249, 255, 0.95));
         border: 1px solid rgba(14, 116, 144, 0.18);
         box-shadow: 0 10px 20px -24px rgba(15, 23, 42, 0.45);
     }
 
     #custom-range-picker label {
-        font-size: 0.74rem;
+        font-size: 0.66rem;
         font-weight: 700;
         color: #334155;
+        margin-bottom: 0.2rem;
     }
 
     input[type="datetime-local"] {
         width: 100%;
         border: 1px solid rgba(148, 163, 184, 0.45);
-        border-radius: 9px;
+        border-radius: 8px;
         background: #ffffff;
-        padding: 0.58rem 0.7rem;
-        font-size: 0.82rem;
+        padding: 0.4rem 0.5rem;
+        font-size: 0.76rem;
         color: #0f172a;
         outline: none;
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
@@ -543,10 +581,11 @@
 
     .range-apply-btn {
         width: 100%;
+        align-self: flex-end;
         border: 1px solid rgba(2, 132, 199, 0.24);
-        border-radius: 10px;
-        padding: 0.58rem 0.78rem;
-        font-size: 0.79rem;
+        border-radius: 9px;
+        padding: 0.42rem 0.65rem;
+        font-size: 0.76rem;
         font-weight: 700;
         line-height: 1.2;
         color: #0c4a6e;
@@ -593,7 +632,7 @@
 
     @media (max-width: 1024px) {
         .chart-canvas {
-            height: 330px;
+            height: 165px;
         }
     }
 
@@ -624,7 +663,7 @@
         }
 
         .chart-canvas {
-            height: 288px;
+            height: 144px;
         }
 
         .chart-toolbar {
@@ -679,140 +718,141 @@
 
 <main class="container mx-auto max-w-7xl px-5 sm:px-6" style="padding-top: 1rem; padding-bottom: 1.7rem; overflow-x: clip;">
     <!-- Control Panel -->
-    <div class="control-panel mb-6 animate-slide-in">
+    <div class="control-panel mb-4 animate-slide-in">
         <div class="grid grid-cols-1 gap-3 lg:grid-cols-12 lg:gap-4">
-            <!-- Combined: View + Date Range in same row -->
-            <section class="panel-section lg:col-span-7" style="padding: 0.7rem;">
-                <div class="flex flex-col gap-3" style="flex-direction: row; gap: 1rem;">
-                    <!-- View Selection -->
-                    <div style="flex: 0 0 33.333%;">
-                        <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
-                            <span class="material-symbols-outlined icon-sm">visibility</span>
-                            View
-                        </h3>
-                        <div class="flex gap-1.5">
-                            <button onclick="switchView('fe')" id="view-fe" class="view-tab view-tab-active flex items-center gap-1.5 justify-center flex-1" style="padding: 0.5rem 0.6rem;">
-                                <span class="material-symbols-outlined icon-sm text-white">engineering</span>
-                                <span>Field</span>
-                            </button>
-                            <button onclick="switchView('noc')" id="view-noc" class="view-tab bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-1.5 justify-center flex-1" style="padding: 0.5rem 0.6rem;">
-                                <span class="material-symbols-outlined icon-sm text-gray-600">headset_mic</span>
-                                <span>NOC</span>
-                            </button>
-                        </div>
-                    </div>
-                    
-                    <!-- Date Range -->
-                    <div style="flex: 0 0 66.666%;">
-                        <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
-                            <span class="material-symbols-outlined icon-sm">calendar_today</span>
-                            Date Range
-                        </h3>
-                        <div class="grid grid-cols-3 gap-1.5">
-                            <button onclick="setDateRange('today')" id="range-today" class="date-btn date-btn-active flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
-                                <span class="material-symbols-outlined icon-xs">today</span>
-                                <span>Today</span>
-                            </button>
-                            <button onclick="setDateRange('yesterday')" id="range-yesterday" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
-                                <span class="material-symbols-outlined icon-xs">history</span>
-                                <span>Yesterday</span>
-                            </button>
-                            <button onclick="setDateRange('last7days')" id="range-last7days" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
-                                <span class="material-symbols-outlined icon-xs">date_range</span>
-                                <span>7 Days</span>
-                            </button>
-                            <button onclick="setDateRange('lastmonth')" id="range-lastmonth" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
-                                <span class="material-symbols-outlined icon-xs">calendar_month</span>
-                                <span>Month</span>
-                            </button>
-                            <button onclick="toggleCustomRange()" id="range-custom" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-1 justify-center col-span-2" style="padding: 0.45rem 0.5rem;">
-                                <span class="material-symbols-outlined icon-xs">event</span>
-                                <span>Custom Range</span>
-                            </button>
-                        </div>
-                        
-                        <!-- Custom Range Picker -->
-                        <div id="custom-range-picker" class="hidden">
-                            <div class="grid grid-cols-1 gap-2">
-                                <div>
-                                    <label class="mb-1 flex items-center gap-1">
-                                        <span class="material-symbols-outlined icon-xs">schedule</span>
-                                        From Date
-                                    </label>
-                                    <input type="datetime-local" id="date-from">
-                                </div>
-                                <div>
-                                    <label class="mb-1 flex items-center gap-1">
-                                        <span class="material-symbols-outlined icon-xs">schedule</span>
-                                        To Date
-                                    </label>
-                                    <input type="datetime-local" id="date-to">
-                                </div>
-                                <button onclick="applyCustomRange()" class="range-apply-btn flex items-center justify-center gap-1.5" style="padding: 0.45rem 0.6rem;">
-                                    <span class="material-symbols-outlined icon-xs">check_circle</span>
-                                    <span>Apply</span>
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-            
-            <!-- Right: KPI Tiles (Horizontal in one row) -->
-            <section class="panel-section lg:col-span-5" style="padding: 0.7rem;">
+            <!-- View Selection -->
+            <section class="panel-section lg:col-span-3" style="padding: 0.7rem;">
                 <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
-                    <span class="material-symbols-outlined icon-sm">insights</span>
-                    Key Metrics
+                    <span class="material-symbols-outlined icon-sm">visibility</span>
+                    View
                 </h3>
                 <div class="flex gap-1.5">
-                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.1s; padding: 0.5rem 0.55rem; min-height: auto;">
-                        <div class="kpi-icon kpi-icon-blue" style="width: 1.8rem; height: 1.8rem;">
-                            <span class="material-symbols-outlined" style="font-size: 16px !important;">play_circle</span>
+                    <button onclick="switchView('fe')" id="view-fe" class="view-tab view-tab-active flex items-center gap-1.5 justify-center flex-1" style="padding: 0.5rem 0.6rem;">
+                        <span class="material-symbols-outlined icon-sm text-white">engineering</span>
+                        <span>Field</span>
+                    </button>
+                    <button onclick="switchView('noc')" id="view-noc" class="view-tab bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-1.5 justify-center flex-1" style="padding: 0.5rem 0.6rem;">
+                        <span class="material-symbols-outlined icon-sm text-gray-600">headset_mic</span>
+                        <span>NOC</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- Date Range -->
+            <section class="panel-section lg:col-span-9" style="padding: 0.7rem;">
+                <h3 class="panel-title" style="margin-bottom: 0.5rem; padding-bottom: 0.35rem;">
+                    <span class="material-symbols-outlined icon-sm">calendar_today</span>
+                    Date Range
+                </h3>
+                <div class="grid grid-cols-3 sm:grid-cols-6 gap-1.5">
+                    <button onclick="setDateRange('alltime')" id="range-alltime" class="date-btn date-btn-active flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                        <span class="material-symbols-outlined icon-xs">all_inclusive</span>
+                        <span>All Time</span>
+                    </button>
+                    <button onclick="setDateRange('today')" id="range-today" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                        <span class="material-symbols-outlined icon-xs">today</span>
+                        <span>Today</span>
+                    </button>
+                    <button onclick="setDateRange('yesterday')" id="range-yesterday" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                        <span class="material-symbols-outlined icon-xs">history</span>
+                        <span>Yesterday</span>
+                    </button>
+                    <button onclick="setDateRange('last7days')" id="range-last7days" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                        <span class="material-symbols-outlined icon-xs">date_range</span>
+                        <span>7 Days</span>
+                    </button>
+                    <button onclick="setDateRange('lastmonth')" id="range-lastmonth" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1" style="padding: 0.45rem 0.5rem;">
+                        <span class="material-symbols-outlined icon-xs">calendar_month</span>
+                        <span>Month</span>
+                    </button>
+                    <button onclick="toggleCustomRange()" id="range-custom" class="date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-1 justify-center" style="padding: 0.45rem 0.5rem;">
+                        <span class="material-symbols-outlined icon-xs">event</span>
+                        <span>Custom</span>
+                    </button>
+                </div>
+
+                <!-- Custom Range Picker -->
+                <div id="custom-range-picker" class="hidden">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+                        <div>
+                            <label class="mb-1 flex items-center gap-1">
+                                <span class="material-symbols-outlined icon-xs">schedule</span>
+                                From Date
+                            </label>
+                            <input type="datetime-local" id="date-from">
                         </div>
-                        <div class="min-w-0">
-                            <p class="kpi-label" style="font-size: 0.6rem;">Started</p>
-                            <p class="kpi-value text-blue-600" id="kpi-started" style="font-size: 0.95rem; margin-top: 0.1rem;">0</p>
+                        <div>
+                            <label class="mb-1 flex items-center gap-1">
+                                <span class="material-symbols-outlined icon-xs">schedule</span>
+                                To Date
+                            </label>
+                            <input type="datetime-local" id="date-to">
                         </div>
-                    </div>
-                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.2s; padding: 0.5rem 0.55rem; min-height: auto;">
-                        <div class="kpi-icon kpi-icon-green" style="width: 1.8rem; height: 1.8rem;">
-                            <span class="material-symbols-outlined" style="font-size: 16px !important;">check_circle</span>
-                        </div>
-                        <div class="min-w-0">
-                            <p class="kpi-label" style="font-size: 0.6rem;">Completed</p>
-                            <p class="kpi-value text-green-600" id="kpi-completed" style="font-size: 0.95rem; margin-top: 0.1rem;">0</p>
-                        </div>
-                    </div>
-                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.3s; padding: 0.5rem 0.55rem; min-height: auto;">
-                        <div class="kpi-icon kpi-icon-orange" style="width: 1.8rem; height: 1.8rem;">
-                            <span class="material-symbols-outlined" style="font-size: 16px !important;">pending</span>
-                        </div>
-                        <div class="min-w-0">
-                            <p class="kpi-label" style="font-size: 0.6rem;">In Progress</p>
-                            <p class="kpi-value text-orange-600" id="kpi-in-progress" style="font-size: 0.95rem; margin-top: 0.1rem;">0</p>
-                        </div>
-                    </div>
-                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.4s; padding: 0.5rem 0.55rem; min-height: auto;">
-                        <div class="kpi-icon kpi-icon-red" style="width: 1.8rem; height: 1.8rem; background: rgba(239, 68, 68, 0.15); color: #dc2626;">
-                            <span class="material-symbols-outlined" style="font-size: 16px !important;">inbox</span>
-                        </div>
-                        <div class="min-w-0">
-                            <p class="kpi-label" style="font-size: 0.6rem;">Unassigned</p>
-                            <p class="kpi-value text-red-600" id="kpi-unassigned" style="font-size: 0.95rem; margin-top: 0.1rem;">0</p>
-                        </div>
-                    </div>
-                    <div class="kpi-card animate-scale-in flex-1" style="animation-delay: 0.5s; padding: 0.5rem 0.55rem; min-height: auto;">
-                        <div class="kpi-icon kpi-icon-amber" style="width: 1.8rem; height: 1.8rem;">
-                            <span class="material-symbols-outlined" style="font-size: 16px !important;">schedule</span>
-                        </div>
-                        <div class="min-w-0">
-                            <p class="kpi-label" style="font-size: 0.6rem;">Avg Time</p>
-                            <p class="kpi-value text-amber-600" id="kpi-avg-completion" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
-                        </div>
+                        <button onclick="applyCustomRange()" class="range-apply-btn flex items-center justify-center gap-1.5">
+                            <span class="material-symbols-outlined icon-xs">check_circle</span>
+                            <span>Apply</span>
+                        </button>
                     </div>
                 </div>
             </section>
         </div>
+    </div>
+
+    <!-- Key Metrics -->
+    <div class="control-panel mb-6 animate-slide-in">
+        <section class="panel-section" style="padding: 0.7rem;">
+            <h3 class="panel-title" style="margin-bottom: 0.6rem; padding-bottom: 0.35rem;">
+                <span class="material-symbols-outlined icon-sm">insights</span>
+                Key Metrics
+            </h3>
+            <div class="kpi-strip">
+                <div class="kpi-card animate-scale-in" style="animation-delay: 0.1s;">
+                    <div class="kpi-icon kpi-icon-blue">
+                        <span class="material-symbols-outlined" style="font-size: 18px !important;">play_circle</span>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="kpi-label">Started</p>
+                        <p class="kpi-value text-blue-600" id="kpi-started">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="animation-delay: 0.2s;">
+                    <div class="kpi-icon kpi-icon-green">
+                        <span class="material-symbols-outlined" style="font-size: 18px !important;">check_circle</span>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="kpi-label">Completed</p>
+                        <p class="kpi-value text-green-600" id="kpi-completed">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="animation-delay: 0.3s;">
+                    <div class="kpi-icon kpi-icon-orange">
+                        <span class="material-symbols-outlined" style="font-size: 18px !important;">pending</span>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="kpi-label">In Progress</p>
+                        <p class="kpi-value text-orange-600" id="kpi-in-progress">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="animation-delay: 0.4s;">
+                    <div class="kpi-icon" style="background: rgba(239, 68, 68, 0.15); color: #dc2626;">
+                        <span class="material-symbols-outlined" style="font-size: 18px !important;">inbox</span>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="kpi-label">Unassigned</p>
+                        <p class="kpi-value text-red-600" id="kpi-unassigned">0</p>
+                    </div>
+                </div>
+                <div class="kpi-card animate-scale-in" style="animation-delay: 0.5s;">
+                    <div class="kpi-icon kpi-icon-amber">
+                        <span class="material-symbols-outlined" style="font-size: 18px !important;">schedule</span>
+                    </div>
+                    <div class="min-w-0">
+                        <p class="kpi-label">Avg Time</p>
+                        <p class="kpi-value text-amber-600" id="kpi-avg-completion">-</p>
+                    </div>
+                </div>
+            </div>
+        </section>
     </div>
 
     <!-- Breadcrumb Navigation -->
@@ -870,47 +910,47 @@
                 <span class="material-symbols-outlined icon-sm">monitoring</span>
                 Operational Metrics
             </h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-1.5">
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">SIM1 Failures</p>
-                        <p class="kpi-value text-red-500" id="kpi-sim1-fails" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+            <div class="kpi-strip-sm">
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">SIM1 Failures</p>
+                        <p class="kpi-value text-red-500" id="kpi-sim1-fails">0</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">SIM2 Failures</p>
-                        <p class="kpi-value text-red-400" id="kpi-sim2-fails" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">SIM2 Failures</p>
+                        <p class="kpi-value text-red-400" id="kpi-sim2-fails">0</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP Failures</p>
-                        <p class="kpi-value text-orange-500" id="kpi-ztp-fails" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">ZTP Failures</p>
+                        <p class="kpi-value text-orange-500" id="kpi-ztp-fails">0</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP by FE</p>
-                        <p class="kpi-value text-blue-500" id="kpi-ztp-fe" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">ZTP by FE</p>
+                        <p class="kpi-value text-blue-500" id="kpi-ztp-fe">0</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP by NOC</p>
-                        <p class="kpi-value text-purple-500" id="kpi-ztp-noc" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">ZTP by NOC</p>
+                        <p class="kpi-value text-purple-500" id="kpi-ztp-noc">0</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">HSO Retries</p>
-                        <p class="kpi-value text-amber-500" id="kpi-hso-multi" style="font-size: 0.85rem; margin-top: 0.1rem;">0</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">HSO Retries</p>
+                        <p class="kpi-value text-amber-500" id="kpi-hso-multi">0</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">Completion %</p>
-                        <p class="kpi-value text-green-500" id="kpi-completion-rate" style="font-size: 0.85rem; margin-top: 0.1rem;">0%</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">Completion %</p>
+                        <p class="kpi-value text-green-500" id="kpi-completion-rate">0%</p>
                     </div>
                 </div>
             </div>
@@ -924,47 +964,47 @@
                 <span class="material-symbols-outlined icon-sm">timer</span>
                 Average Stage Durations (minutes)
             </h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-1.5">
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">Queue Wait</p>
-                        <p class="kpi-value text-indigo-600" id="kpi-avg-queue" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+            <div class="kpi-strip-sm">
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">Queue Wait</p>
+                        <p class="kpi-value text-indigo-600" id="kpi-avg-queue">-</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">SIM1 Activation</p>
-                        <p class="kpi-value text-blue-600" id="kpi-avg-sim1" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">SIM1 Activation</p>
+                        <p class="kpi-value text-blue-600" id="kpi-avg-sim1">-</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">SIM2 Activation</p>
-                        <p class="kpi-value text-cyan-600" id="kpi-avg-sim2" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">SIM2 Activation</p>
+                        <p class="kpi-value text-cyan-600" id="kpi-avg-sim2">-</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP Config</p>
-                        <p class="kpi-value text-teal-600" id="kpi-avg-ztp-config" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">ZTP Config</p>
+                        <p class="kpi-value text-teal-600" id="kpi-avg-ztp-config">-</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">ZTP Execution</p>
-                        <p class="kpi-value text-green-600" id="kpi-avg-ztp-exec" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">ZTP Execution</p>
+                        <p class="kpi-value text-green-600" id="kpi-avg-ztp-exec">-</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">NS Processing</p>
-                        <p class="kpi-value text-amber-600" id="kpi-avg-ns-proc" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">NS Processing</p>
+                        <p class="kpi-value text-amber-600" id="kpi-avg-ns-proc">-</p>
                     </div>
                 </div>
-                <div class="kpi-card animate-scale-in" style="padding: 0.5rem 0.55rem; min-height: auto;">
-                    <div class="min-w-0 text-center w-full">
-                        <p class="kpi-label" style="font-size: 0.55rem;">HSO Review</p>
-                        <p class="kpi-value text-red-600" id="kpi-avg-hso" style="font-size: 0.85rem; margin-top: 0.1rem;">-</p>
+                <div class="kpi-card kpi-card-plain animate-scale-in">
+                    <div class="min-w-0 w-full">
+                        <p class="kpi-label">HSO Review</p>
+                        <p class="kpi-value text-red-600" id="kpi-avg-hso">-</p>
                     </div>
                 </div>
             </div>
@@ -979,7 +1019,7 @@
                 <span class="material-symbols-outlined icon-lg text-indigo-600">stacked_bar_chart</span>
                 <span>Avg Stage Durations</span>
             </h3>
-            <div class="chart-canvas" style="height: 280px;"><canvas id="stage-duration-chart"></canvas></div>
+            <div class="chart-canvas" style="height: 140px;"><canvas id="stage-duration-chart"></canvas></div>
         </div>
 
         <!-- Status Distribution Doughnut -->
@@ -1006,7 +1046,7 @@
                 <span class="material-symbols-outlined icon-lg text-blue-600">sim_card</span>
                 <span>SIM Activation Performance</span>
             </h3>
-            <div class="chart-canvas" style="height: 280px;"><canvas id="sim-perf-chart"></canvas></div>
+            <div class="chart-canvas" style="height: 140px;"><canvas id="sim-perf-chart"></canvas></div>
         </div>
 
         <!-- SIM Provider Performance Chart -->
@@ -1015,13 +1055,13 @@
                 <span class="material-symbols-outlined icon-lg text-purple-600">signal_cellular_alt</span>
                 <span>SIM Performance by Provider</span>
             </h3>
-            <div class="chart-canvas" style="height: 280px;"><canvas id="sim-provider-chart"></canvas></div>
+            <div class="chart-canvas" style="height: 140px;"><canvas id="sim-provider-chart"></canvas></div>
         </div>
     </div>
 </main>
 
 <script>
-let currentView = 'fe', currentRange = 'today', currentLevel = 0;
+let currentView = 'fe', currentRange = 'alltime', currentLevel = 0;
 let selectedDay = null, selectedUser = null, selectedUserId = null;
 let customDateFrom = null, customDateTo = null;
 let mainChart = null, trendChart = null, currentChartData = null;
@@ -1052,31 +1092,26 @@ function switchView(view) {
 function setDateRange(range) {
     currentRange = range;
     const rangeButtons = {
+        'alltime': { icon: 'all_inclusive', text: 'All Time' },
         'today': { icon: 'today', text: 'Today' },
         'yesterday': { icon: 'history', text: 'Yesterday' },
         'last7days': { icon: 'date_range', text: '7 Days' },
-        'lastmonth': { icon: 'calendar_month', text: 'Month' }
+        'lastmonth': { icon: 'calendar_month', text: 'Month' },
+        'custom': { icon: 'event', text: 'Custom' }
     };
-    
-    ['today', 'yesterday', 'last7days', 'lastmonth'].forEach(r => {
+
+    Object.keys(rangeButtons).forEach(r => {
         const btn = document.getElementById(`range-${r}`);
         const btnData = rangeButtons[r];
         if (r === range) {
-            btn.className = 'date-btn date-btn-active flex items-center justify-center gap-1.5';
-            btn.innerHTML = `<span class="material-symbols-outlined icon-sm">${btnData.icon}</span><span>${btnData.text}</span>`;
+            btn.className = 'date-btn date-btn-active flex items-center justify-center gap-1';
+            btn.innerHTML = `<span class="material-symbols-outlined icon-xs">${btnData.icon}</span><span>${btnData.text}</span>`;
         } else {
-            btn.className = 'date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1.5';
-            btn.innerHTML = `<span class="material-symbols-outlined icon-sm">${btnData.icon}</span><span>${btnData.text}</span>`;
+            btn.className = 'date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center justify-center gap-1';
+            btn.innerHTML = `<span class="material-symbols-outlined icon-xs">${btnData.icon}</span><span>${btnData.text}</span>`;
         }
     });
-    
-    const customBtn = document.getElementById('range-custom');
-    if (range === 'custom') {
-        customBtn.className = 'date-btn date-btn-active flex items-center gap-2 justify-center w-full mt-2';
-    } else {
-        customBtn.className = 'date-btn bg-gray-100 text-gray-700 hover:bg-gray-200 flex items-center gap-2 justify-center w-full mt-2';
-    }
-    
+
     if (range !== 'custom') { document.getElementById('custom-range-picker').classList.add('hidden'); loadAnalytics(); }
 }
 
@@ -1313,8 +1348,9 @@ function renderOverviewChart(data) {
                     grid: { color: 'rgba(0, 0, 0, 0.05)' } 
                 }
             },
-            barPercentage: 0.4,
-            categoryPercentage: 0.5
+            barPercentage: 0.6,
+            categoryPercentage: 0.7,
+            maxBarThickness: 24
         }
     });
 }
@@ -1365,8 +1401,9 @@ function renderNOCDayChart(data) {
                 x: { grid: { display: false }, ticks: { font: { size: 11, weight: '500' } } },
                 y: { beginAtZero: true, ticks: { stepSize: 1, font: { size: 11, weight: '500' } }, grid: { color: 'rgba(0, 0, 0, 0.05)' } }
             },
-            barPercentage: 0.4,
-            categoryPercentage: 0.5
+            barPercentage: 0.6,
+            categoryPercentage: 0.7,
+            maxBarThickness: 24
         }
     });
 }
@@ -1377,7 +1414,7 @@ function renderTimelineChart(data) {
     
     // Create datasets - one per tracker
     const datasets = data.trackers.map((tracker, idx) => {
-        const colors = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
+        const colors = ['#2a78d6', '#1baf7a', '#eda100', '#008300', '#4a3aa7', '#e34948', '#e87ba4', '#eb6834'];
         const color = colors[idx % colors.length];
         
         // Create points for each event
@@ -1606,8 +1643,9 @@ function renderTrendChart(data) {
                 y: { type: 'linear', display: true, position: 'left', beginAtZero: true, title: { display: true, text: 'Count', font: { size: 12, weight: 'bold' } }, ticks: { stepSize: 1, font: { size: 11, weight: '500' } }, grid: { color: 'rgba(0, 0, 0, 0.05)' } },
                 y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, title: { display: true, text: 'Hours', font: { size: 12, weight: 'bold' } }, ticks: { font: { size: 11, weight: '500' } }, grid: { drawOnChartArea: false } }
             },
-            barPercentage: 0.4,
-            categoryPercentage: 0.5
+            barPercentage: 0.6,
+            categoryPercentage: 0.7,
+            maxBarThickness: 24
         }
     });
 }
@@ -1669,7 +1707,10 @@ async function loadStageDurationChart() {
                     tooltip: { callbacks: { label: c => c.raw + ' min' } }
                 },
                 scales: { x: { title: { display: true, text: 'Minutes' }, grid: { color: 'rgba(0,0,0,0.05)' } },
-                         y: { grid: { display: false } } }
+                         y: { grid: { display: false } } },
+                barPercentage: 0.6,
+                categoryPercentage: 0.7,
+                maxBarThickness: 24
             }
         });
     } catch (e) { console.error('Stage duration chart error:', e); }
@@ -1728,16 +1769,19 @@ async function loadSIMPerfChart() {
                 labels: ['Success', 'Failed', 'Pending'],
                 datasets: [
                     { label: 'SIM1', data: [data.sim1.success, data.sim1.failed, data.sim1.pending],
-                      backgroundColor: ['#22C55E', '#EF4444', '#D1D5DB'] },
+                      backgroundColor: ['#0ca30c', '#d03b3b', '#c3c2b7'] },
                     { label: 'SIM2', data: [data.sim2.success, data.sim2.failed, data.sim2.pending],
-                      backgroundColor: ['#10B981', '#F97316', '#E5E7EB'] },
+                      backgroundColor: ['rgba(12,163,12,0.55)', 'rgba(208,59,59,0.55)', 'rgba(195,194,183,0.55)'] },
                 ]
             },
             options: {
                 responsive: true, maintainAspectRatio: false,
                 plugins: { legend: { position: 'top', labels: { boxWidth: 12 } } },
                 scales: { y: { beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } },
-                         x: { grid: { display: false } } }
+                         x: { grid: { display: false } } },
+                barPercentage: 0.6,
+                categoryPercentage: 0.7,
+                maxBarThickness: 24
             }
         });
     } catch (e) { console.error('SIM perf chart error:', e); }
@@ -1760,9 +1804,9 @@ async function loadSIMProviderChart() {
             data: {
                 labels: providers,
                 datasets: [
-                    { label: 'Success', data: success, backgroundColor: '#22C55E', stack: 'sim' },
-                    { label: 'Failed',  data: failed,  backgroundColor: '#EF4444', stack: 'sim' },
-                    { label: 'Pending', data: pending, backgroundColor: '#D1D5DB', stack: 'sim' },
+                    { label: 'Success', data: success, backgroundColor: '#0ca30c', stack: 'sim' },
+                    { label: 'Failed',  data: failed,  backgroundColor: '#d03b3b', stack: 'sim' },
+                    { label: 'Pending', data: pending, backgroundColor: '#c3c2b7', stack: 'sim' },
                 ]
             },
             options: {
@@ -1783,7 +1827,10 @@ async function loadSIMProviderChart() {
                 scales: {
                     x: { stacked: true, grid: { display: false } },
                     y: { stacked: true, beginAtZero: true, grid: { color: 'rgba(0,0,0,0.05)' } }
-                }
+                },
+                barPercentage: 0.55,
+                categoryPercentage: 0.65,
+                maxBarThickness: 28
             }
         });
     } catch (e) { console.error('SIM provider chart error:', e); }

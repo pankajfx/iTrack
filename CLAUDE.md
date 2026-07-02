@@ -1,5 +1,8 @@
 # CLAUDE.md — ITrack (SDWAN Installation Tracker)
 
+> ## ⚠️ Read `PROJECT_GUIDE.md` first
+> **Before starting any task**, open [`PROJECT_GUIDE.md`](PROJECT_GUIDE.md), use its **Section Index** to jump to the section(s) relevant to your task, and follow it. It is the **single source of truth** — architecture, workflow, data model, API surface, security gaps, Windows-production caveats, mobile/responsive rules, and the one-time scripts. Read only the sections you need, not the whole file. **If the code and the guide disagree, the code wins — fix the guide in the same change.** The quick reference below is a summary; the guide is authoritative.
+
 ## Project Origin
 This codebase is a **clean production snapshot** migrated from `.production/` of a prior development project. It is the official starting point for continued development.
 
@@ -39,12 +42,18 @@ This codebase is a **clean production snapshot** migrated from `.production/` of
 ## Project Structure
 
 ```
-app.py                  # ALL routes + business logic (single file)
+app.py                  # ALL routes + business logic (single file) + /admin panel
 theme_config.py         # Role-based theme definitions
-init_db.py              # DB init script (collections, indexes, sample users)
+init_db.py              # LEGACY — do not use for indexes/users (see PROJECT_GUIDE §12)
 Requirements.txt        # Python deps
 package.json            # Node deps (Tailwind only)
 tailwind.config.js      # Tailwind config
+
+scripts/                # One-time scripts (tracked; *.xlsx gitignored)
+  create_indexes.py     # Canonical MongoDB index setup (idempotent)
+  seed_users.py         # DESTRUCTIVE user seed from master workbook
+  seed_trackers.py      # Sample tracker data (demo/testing only)
+exec_prod/              # Windows ops console (ServerAdminPankaj_V3.ps1) + deploy payload
 
 templates/
   base.html                    # Base layout (CDN: Socket.IO, Chart.js)
@@ -66,7 +75,7 @@ static/
   js/realtime_handler.js  # Socket.IO-first update handler with API fallback
 ```
 
-**Assets folder** (one-time scripts, docs) lives outside root and is gitignored.
+One-time scripts live in the tracked `scripts/` folder (the user-data `.xlsx` is gitignored). The `assets/` folder (misc docs/dev files) remains gitignored.
 
 ---
 
@@ -141,8 +150,9 @@ python app.py
 run.bat          # Windows shortcut
 ./run.sh         # Linux/Mac shortcut
 
-# Init/reset database
-python init_db.py
+# Set up a fresh database (NOT init_db.py — that is legacy)
+python scripts/create_indexes.py   # canonical indexes (idempotent)
+python scripts/seed_users.py       # seed users (DESTRUCTIVE — see guide §12)
 
 # Rebuild Tailwind CSS (only if templates changed)
 npm install
@@ -156,16 +166,19 @@ npm run watch:css
 ```bash
 MONGO_URI=mongodb://localhost:27017/sdwan_tracker
 SECRET_KEY=your-strong-secret-key
-REALTIME_MODE=hybrid   # 'socket' | 'api' | 'hybrid'
+ADMIN_PASSWORD=change-me           # /admin panel; default 'qwerty' — set in prod
+REALTIME_MODE=hybrid               # 'socket' | 'api' | 'hybrid'
+PORT=5001                          # default listen port
 ```
 
-Default dev server: `http://localhost:5000`
+Default dev server: `http://localhost:5001` (override with `PORT`)
 
 ---
 
 ## Rules for This Project
 
-- **Keep root clean**: only essential files in root. One-time scripts → `assets/scripts/`. Docs → `assets/md/`.
+- **Keep root clean**: only essential files in root. One-time scripts → `scripts/` (tracked). Misc dev docs → `assets/` (gitignored).
+- **Docs go in `PROJECT_GUIDE.md`** — do not create new standalone markdown files; add to the relevant section of the guide.
 - **Don't create extra markdown files** for small changes — insert into an existing relevant doc.
 - **Don't edit `output.css` directly** — rebuild from `input.css` via Tailwind.
 - **Chat unlock is status-driven** — only unlocked in `CHAT_UNLOCKED_STATUSES` set.

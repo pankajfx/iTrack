@@ -7,11 +7,11 @@ with fewer trackers on weekends.
 
 Run any time to reset test data relative to the current date.
 
-Usage:
-    python seed_trackers.py
+Usage (run from project root):
+    python scripts/seed_trackers.py
 
 Requirements:
-    - MongoDB running, users already seeded (run init_db.py first)
+    - MongoDB running, users already seeded (run scripts/seed_users.py first)
     - At least 1 FIELD_ENGINEER and 1 NOC_SUPPORT user must exist in db.users
 """
 

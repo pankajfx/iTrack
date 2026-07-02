@@ -61,3 +61,8 @@ Thumbs.db
 
 # Assets folder (documentation, scripts, test files)
 assets/
+
+# One-time scripts live in tracked scripts/ (.py files are versioned), but the
+# user-data workbook holds real accounts and must NOT be committed.
+scripts/*.xlsx
+.gitignore

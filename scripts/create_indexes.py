@@ -4,9 +4,9 @@ create_indexes.py — MongoDB index setup for ITrack (SDWAN Tracker)
 Analyses all query patterns across endpoints and creates optimal indexes.
 Safe to run multiple times — skips indexes that already exist.
 
-Usage:
-    python create_indexes.py
-    MONGO_URI=mongodb://... python create_indexes.py
+Usage (run from project root):
+    python scripts/create_indexes.py
+    MONGO_URI=mongodb://... python scripts/create_indexes.py
 """
 
 import os

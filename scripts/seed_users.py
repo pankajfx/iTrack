@@ -1,15 +1,15 @@
 """
 seed_users.py
 ─────────────
-Reads user data from the Excel file:
-    static/scripts/SDWAN Installation Tracker Master User Data.xlsx
+Reads user data from the Excel file (co-located with this script):
+    scripts/SDWAN Installation Tracker Master User Data.xlsx
 
 Clears the users collection and re-populates it with all users.
 Passwords are hashed with Werkzeug. FEG hierarchy (field_support) is
 derived from region → FS username mapping.
 
 Usage (run from project root):
-    python static/scripts/seed_users.py
+    python scripts/seed_users.py
 
 Requirements:
     pip install openpyxl werkzeug pymongo

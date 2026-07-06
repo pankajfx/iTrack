@@ -21,12 +21,14 @@ from collections import Counter
 from datetime import datetime, timedelta
 from pymongo import MongoClient
 from bson import ObjectId
+from dotenv import load_dotenv
+
+# Load environment variables from the project-root .env (parent of scripts/).
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
 
 random.seed()  # fresh seed each run so spread varies
 
 MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/sdwan_tracker')
-#prod
-# MONGO_URI  = os.environ.get('MONGO_URI', 'mongodb://myAdminUser:MyStrongPassword123@localhost:27017/sdwan_tracker?authSource=admin')
 client = MongoClient(MONGO_URI)
 db = client.get_default_database()
 

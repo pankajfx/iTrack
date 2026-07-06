@@ -23,6 +23,7 @@ from datetime import datetime
 from bson import ObjectId
 from pymongo import MongoClient
 from werkzeug.security import generate_password_hash
+from dotenv import load_dotenv
 
 try:
     import openpyxl
@@ -30,10 +31,11 @@ except ImportError:
     print("ERROR: openpyxl not installed. Run: pip install openpyxl")
     sys.exit(1)
 
+# Load environment variables from the project-root .env (parent of scripts/).
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env'))
+
 # ── Config ────────────────────────────────────────────────────────────────────
 MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/sdwan_tracker')
-#prod
-# MONGO_URI  = os.environ.get('MONGO_URI', 'mongodb://myAdminUser:MyStrongPassword123@localhost:27017/sdwan_tracker?authSource=admin')
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 EXCEL_PATH = os.path.join(SCRIPT_DIR, 'SDWAN Installation Tracker Master User Data.xlsx')
 

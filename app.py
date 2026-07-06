@@ -6,7 +6,11 @@ from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 import os
 from functools import wraps
+from dotenv import load_dotenv
 from theme_config import get_active_fe_theme, get_active_noc_theme, get_theme_for_role
+
+# Load environment variables from the project-root .env before reading any config.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')

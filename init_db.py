@@ -1,9 +1,15 @@
+import os
 from pymongo import MongoClient
 from datetime import datetime, timezone
+from dotenv import load_dotenv
 
-# Connect to MongoDB
-client = MongoClient('mongodb://localhost:27017/')
-db = client['sdwan_tracker']
+# Load environment variables from the project-root .env.
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+
+# Connect to MongoDB (URI from .env; database name is taken from the URI path)
+MONGO_URI = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/sdwan_tracker')
+client = MongoClient(MONGO_URI)
+db = client.get_default_database()
 
 # Create collections
 collections = ['trackers', 'noc_users', 'notifications', 'audit_logs', 'predefined_reasons', 'chat_messages']

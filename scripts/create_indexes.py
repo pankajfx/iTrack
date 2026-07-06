@@ -13,6 +13,10 @@ import os
 import sys
 from pymongo import MongoClient, ASCENDING, DESCENDING
 from pymongo.errors import OperationFailure
+from dotenv import load_dotenv
+
+# Load environment variables from the project-root .env (parent of scripts/).
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 # ─── Config ──────────────────────────────────────────────────────────────────
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/sdwan_tracker")

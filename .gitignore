@@ -66,3 +66,29 @@ assets/
 # user-data workbook holds real accounts and must NOT be committed.
 scripts/*.xlsx
 .gitignore
+
+# ─── Android / Flutter app (android/) ────────────────────────────────────────
+# The Python patterns above (lib/, build/, dist/) would otherwise swallow the
+# Flutter Dart source and platform folders. Re-include the app source, then
+# ignore only the regenerated build/tooling output and signing secrets.
+!android/lib/
+!android/lib/**
+!android/test/**
+!android/web/**
+
+# Flutter/Gradle build + tooling output (regenerated; never committed)
+android/build/
+android/.dart_tool/
+android/.flutter-plugins
+android/.flutter-plugins-dependencies
+android/android/.gradle/
+android/android/build/
+android/android/app/build/
+android/android/local.properties
+android/.flutter-plugins-dependencies
+
+# APK signing secrets — NEVER commit these (see android/docs/BUILD_RELEASE.md)
+android/android/key.properties
+android/android/keystore/
+*.jks
+*.keystore

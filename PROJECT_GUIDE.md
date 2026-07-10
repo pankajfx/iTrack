@@ -24,6 +24,7 @@
 | 12 | [One-time scripts](#12-one-time-scripts) | seeding, indexes, ops console |
 | 13 | [Dev commands & environment variables](#13-dev-commands--environment-variables) | running locally, config |
 | 14 | [Known issues & improvement roadmap](#14-known-issues--improvement-roadmap) | what to build/fix next |
+| 15 | [Android app (`android/`) & `android_backend/`](#15-android-app-android--android_backend) | the Flutter FE mobile app + its API |
 
 ---
 
@@ -334,3 +335,34 @@ Still-valid items (the resolved real-time bugs from the old ANALYSIS.md have bee
 - Consider splitting `app.py` into blueprints as it grows.
 
 **Security** — see the prioritized checklist in [§8](#8-security--gaps--missing-controls).
+
+---
+
+## 15. Android app (`android/`) & `android_backend/`
+
+A native **Flutter (Dart) Android app** that reproduces the **FIELD_ENGINEER** experience of the web app, distributed as a sideloadable **APK** (no Play Store). It talks **directly to this same Flask server** over the existing `/api/*` routes using the **same session-cookie auth** — no separate backend, no duplicated business logic.
+
+### Two new folders
+- **`android/`** — the Flutter project (`itrack_fe`). Full docs live in **[`android/docs/`](android/docs/)** — start with [`android/docs/OVERVIEW.md`](android/docs/OVERVIEW.md) (complete detailed reference), then ARCHITECTURE/SETUP/TESTING/BUILD_RELEASE.
+- **`android_backend/`** — a thin, **read-only** Flask blueprint mounted at `/api/android/*`, registered from `app.py` with two lines (just before `if __name__ == '__main__':`). It never writes to trackers/users/chat, so it cannot affect the website's behavior.
+
+### `android_backend` endpoints
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /api/android/ping` | none | Connectivity check for the app's "Server Setup" screen. Returns `{app, server_time, min_app_version}`. |
+| `GET /api/android/me` | session | Logged-in user profile as clean JSON (incl. `user_id` for Socket.IO), or a real **401** JSON when logged out (the web `login_required` returns a 302→/login redirect, which mobile can't parse). |
+| `GET /api/android/form-options` | session | New-installation dropdown lists (customers, SIM providers, router types/makes) from the new **`form_options`** collection. Each option is `{value, label}`. |
+
+The blueprint intentionally has **zero imports from `app.py`** (avoids circular imports); it redefines the FE role set and a minimal serializer locally — keep those in sync with `app.py`'s canonical constants if they change.
+
+### New `form_options` collection
+One document per category: `{category, values:[{value,label}], updated_at}`, unique index on `category`. Seeded from the values currently hardcoded in `templates/fe_new_installation.html` via **`scripts/seed_form_options.py`** (idempotent; `--force` resets to the defaults in `android_backend/form_defaults.py`). Editing the collection changes the app's dropdowns **without rebuilding the APK**.
+
+### Key facts for maintainers
+- **Auth = session cookie** (persistent cookie jar on the phone). No tokens. Session expiry (302→/login, or the `/me` 401) forces a graceful re-login.
+- **Images = base64 data-URLs inline in Mongo** (same as web); the app compresses camera shots to 1024px JPEG q85 before sending.
+- **Real-time = Socket.IO + 30 s polling** (mirrors the web `hybrid` mode); joins `dashboard_{role}`, `user_{id}`, and `tracker_{id}` rooms.
+- **Self-signed HTTPS**: the app trusts the configured host's self-signed cert (Caddy/Nginx) — scoped to that host only. Configure the server URL on the app's Server Setup screen.
+- **Scope**: v1 = FE role, chat text+images (no voice notes yet). FEG/FS/FSG can log in read-only in a later revision (the app already respects `can_interact`).
+- **Run/build**: see [`android/docs/SETUP.md`](android/docs/SETUP.md), [`TESTING.md`](android/docs/TESTING.md), [`BUILD_RELEASE.md`](android/docs/BUILD_RELEASE.md). App identity `com.itrack.fieldapp`, minSdk 23, target 35.
+- **Secrets**: `android/android/key.properties` + `android/android/keystore/` are **gitignored** — never commit the signing key.

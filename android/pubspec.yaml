@@ -1,0 +1,55 @@
+name: itrack_fe
+description: "iTrack Field Engineer app — SDWAN Installation Tracker (Android companion to the Flask web app)."
+publish_to: 'none'
+
+# versionName + versionCode for the APK (bump for every release build).
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.6.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # HTTP + session-cookie auth against the Flask server
+  dio: ^5.7.0
+  cookie_jar: ^4.0.8
+  dio_cookie_manager: ^3.1.1
+  path_provider: ^2.1.5
+
+  # Real-time updates (Engine.IO 4 — compatible with Flask-SocketIO 5.x)
+  socket_io_client: ^2.0.3+1
+
+  # Camera snaps + compression (mirrors server-side Pillow 1024px/q85)
+  image_picker: ^1.1.2
+  flutter_image_compress: ^2.3.0
+
+  # GPS-stamped site photos
+  geolocator: ^13.0.2
+  permission_handler: ^11.3.1
+
+  # Local persistence (server URL, remembered login selections)
+  shared_preferences: ^2.3.3
+
+  # State management + formatting + image viewer
+  provider: ^6.1.2
+  intl: ^0.19.0
+  photo_view: ^0.15.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.1
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/fonts/
+
+  fonts:
+    - family: FjallaOne
+      fonts:
+        - asset: assets/fonts/FjallaOne-Regular.ttf

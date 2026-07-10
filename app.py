@@ -930,7 +930,24 @@ def api_create_tracker():
             'fe_id': session['user_id']
         })
     
-    return jsonify({'success': True, 'tracker': serialize_doc(tracker)})
+    # Return a LEAN tracker: strip the base64 image blobs the client just
+    # uploaded. Echoing them back makes the response multi-MB, which the mobile
+    # client fails to receive over the network ("network error"). Callers only
+    # need the id to navigate; the detail screen re-fetches the full document.
+    lean = serialize_doc(tracker)
+    for img in (lean.get('site_verification') or {}).get('images', []) or []:
+        img.pop('data', None)
+    sim = lean.get('sim') or {}
+    for sim_key in ('sim1', 'sim2'):
+        for img in (sim.get(sim_key) or {}).get('images', []) or []:
+            img.pop('data', None)
+    for img in (lean.get('router') or {}).get('images', []) or []:
+        img.pop('data', None)
+    return jsonify({
+        'success': True,
+        'tracker_id': str(tracker['_id']),
+        'tracker': lean,
+    })
 
 
 # ─── NOC: Assign Tracker ────────────────────────────────────────────────────
@@ -3479,6 +3496,13 @@ def broadcast_to_user(user_id, event_type, data):
         'event_type': event_type,
         'data': data
     }, room=f"user_{user_id}")
+
+
+# ─── Android app API (/api/android/*) ────────────────────────────────────────
+# Mobile-only endpoints for the Flutter FE app — see android_backend/routes.py
+# and PROJECT_GUIDE.md ("Android App"). Read-only; auth failures return JSON 401.
+from android_backend import register_android_api
+register_android_api(app, mongo)
 
 
 if __name__ == '__main__':

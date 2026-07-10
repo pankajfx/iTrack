@@ -53,7 +53,11 @@ scripts/                # One-time scripts (tracked; *.xlsx gitignored)
   create_indexes.py     # Canonical MongoDB index setup (idempotent)
   seed_users.py         # DESTRUCTIVE user seed from master workbook
   seed_trackers.py      # Sample tracker data (demo/testing only)
+  seed_form_options.py  # Seeds form_options collection for the Android app (idempotent)
 exec_prod/              # Windows ops console (ServerAdminPankaj_V3.ps1) + deploy payload
+
+android/                # Flutter FE Android app (itrack_fe) — see PROJECT_GUIDE §15 + android/docs/
+android_backend/        # Thin Flask blueprint /api/android/* for the app (registered in app.py)
 
 templates/
   base.html                    # Base layout (CDN: Socket.IO, Chart.js)

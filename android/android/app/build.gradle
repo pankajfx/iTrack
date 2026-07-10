@@ -1,0 +1,65 @@
+plugins {
+    id "com.android.application"
+    id "kotlin-android"
+    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
+    id "dev.flutter.flutter-gradle-plugin"
+}
+
+// Load release signing config from key.properties if present (gitignored).
+// When absent (fresh clone / dev), release falls back to debug signing so
+// `flutter run --release` still works — see android/docs/BUILD_RELEASE.md.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
+android {
+    namespace = "com.itrack.fieldapp"
+    compileSdk = flutter.compileSdkVersion
+    ndkVersion = flutter.ndkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    kotlinOptions {
+        jvmTarget = JavaVersion.VERSION_1_8
+    }
+
+    defaultConfig {
+        applicationId = "com.itrack.fieldapp"
+        // minSdk 23 (Android 6): uniform runtime-permission model for
+        // camera/location, modern TLS for the self-signed HTTPS path.
+        minSdk = 23
+        targetSdk = flutter.targetSdkVersion
+        versionCode = flutter.versionCode
+        versionName = flutter.versionName
+    }
+
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties['keyAlias']
+                keyPassword = keystoreProperties['keyPassword']
+                // storeFile is relative to android/android/ (where key.properties lives),
+                // so resolve against rootProject — not the app module dir.
+                storeFile = keystoreProperties['storeFile'] ? rootProject.file(keystoreProperties['storeFile']) : null
+                storePassword = keystoreProperties['storePassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Use the real keystore when configured, else debug keys so that
+            // `flutter run --release` works out of the box.
+            signingConfig = keystorePropertiesFile.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+}
+
+flutter {
+    source = "../.."
+}

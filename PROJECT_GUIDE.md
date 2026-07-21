@@ -99,9 +99,10 @@ Legacy statuses kept for old docs: `ztp_pull_verified`, `ztp_pull_done_by_noc`.
 | Database | MongoDB via PyMongo 4.6.1 + Flask-PyMongo 2.3.0 |
 | Auth | Flask server-side sessions + Werkzeug password hashing (no JWT) |
 | Frontend CSS | Tailwind 3.4.1, **pre-compiled** to `static/css/output.css` |
-| Real-time | Socket.IO 4.7.2 client loaded **from CDN** ([base.html:537](templates/base.html#L537)) + REST fallback |
+| Real-time | Socket.IO 4.7.2 client, **self-hosted** ([static/js/vendor/socket.io.min.js](static/js/vendor/socket.io.min.js), loaded at [base.html:537](templates/base.html#L537)) + REST fallback |
 | Icons | Material Symbols (self-hosted woff2). **Font Awesome is CSS/emoji-emulated** — no FA font files are served (the old `tech.md` claim of an FA 7.2.0 dependency is inaccurate). |
-| Charts | Chart.js 4.4.0 (analytics) |
+| Fonts | Inter, Manrope, Outfit, Fjalla One — all **self-hosted** variable woff2/ttf in `static/fonts/`, declared in `static/css/fonts.css`. No Google Fonts requests. |
+| Charts | Chart.js 4.4.0 + chartjs-adapter-date-fns + hammerjs + chartjs-plugin-zoom, all **self-hosted** in `static/js/vendor/` (analytics dashboard) |
 | Images | Pillow (chat upload processing) |
 | Excel | openpyxl (analytics export + user seeding) |
 | Templates | Jinja2 |
@@ -220,7 +221,7 @@ Edit the `$Cfg` block at the top (`AppRoot`, `VenvPython`, `Port`, cert paths, s
 - **MongoDB auth:** the authenticated prod URI is commented out ([app.py:15](app.py#L15)); the default is **unauthenticated localhost**. Enable auth and bind carefully; never expose Mongo externally.
 - **Perf flags:** `TEMPLATES_AUTO_RELOAD=True` and `SEND_FILE_MAX_AGE_DEFAULT=0` ([app.py:18-19](app.py#L18)) disable template/static caching — turn these off / raise cache age in production.
 - **Logging:** the app uses `print()` throughout. Under NSSM, redirect `AppStdout`/`AppStderr` to log files and configure rotation.
-- **CDN dependency:** Socket.IO loads from `cdn.socket.io` with **no SRI hash** ([base.html:537](templates/base.html#L537)). CDN outage or offline field networks break real-time (REST fallback via `REALTIME_MODE` mitigates but degrades UX). Consider self-hosting the client.
+- **All third-party assets are self-hosted** (Socket.IO, Chart.js stack, Inter/Manrope/Outfit/Fjalla fonts, Material Symbols) under `static/js/vendor/` and `static/fonts/` — no CDN or Google Fonts requests at runtime, so the app works on offline/field networks. If a library version needs bumping, re-download the file into `static/js/vendor/` (or refresh the woff2 in `static/fonts/` via the Google Fonts CSS API) rather than pointing back at a CDN.
 - **Firewall / binding:** the app binds `0.0.0.0:5001`. Expose only the reverse-proxy port; block 5001 to external traffic.
 
 ---
@@ -255,7 +256,7 @@ Edit the `$Cfg` block at the top (`AppRoot`, `VenvPython`, `Port`, cert paths, s
 - Threading async mode → limited concurrency; not horizontally scalable as-is.
 - Analytics compute in Python by loading all matching trackers (no Mongo aggregation pipeline) → slow at scale.
 - Chat attachments as base64 in documents → doc bloat, 16 MB BSON ceiling.
-- `print()`-based logging; CDN dependency for a field app.
+- `print()`-based logging.
 
 **Loopholes (security — see [§8](#8-security--gaps--missing-controls))**
 - Unauthenticated Socket.IO room join leaks full tracker data (IDOR).

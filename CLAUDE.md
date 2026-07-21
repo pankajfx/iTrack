@@ -32,7 +32,7 @@ This codebase is a **clean production snapshot** migrated from `.production/` of
 | Database | MongoDB (PyMongo 4.6.1) |
 | Auth | Flask sessions + Werkzeug password hashing |
 | Frontend CSS | Tailwind CSS 3.4.1 (pre-compiled `output.css`) |
-| Real-time | Socket.IO 4.7.2 (CDN) with REST fallback |
+| Real-time | Socket.IO 4.7.2 (self-hosted) with REST fallback |
 | Icons | Material Symbols (self-hosted) |
 | Charts | Chart.js 4.4.0 (analytics) |
 | Templates | Jinja2 |
@@ -73,6 +73,7 @@ static/
   css/fonts.css           # Font-face declarations
   fonts/                  # Self-hosted: Fjalla One + Material Symbols
   js/realtime_handler.js  # Socket.IO-first update handler with API fallback
+  js/vendor/               # Self-hosted Socket.IO client + Chart.js stack (no CDN)
 ```
 
 One-time scripts live in the tracked `scripts/` folder (the user-data `.xlsx` is gitignored). The `assets/` folder (misc docs/dev files) remains gitignored.
@@ -183,5 +184,5 @@ Default dev server: `http://localhost:5001` (override with `PORT`)
 - **Don't edit `output.css` directly** — rebuild from `input.css` via Tailwind.
 - **Chat unlock is status-driven** — only unlocked in `CHAT_UNLOCKED_STATUSES` set.
 - **Themes are injected server-side** — configured in `theme_config.py`, rendered in `theme_styles.html`.
-- **Socket.IO loaded from CDN** in `base.html` — no local copy.
+- **Socket.IO and all vendor JS/fonts are self-hosted** under `static/js/vendor/` and `static/fonts/` — no CDN or Google Fonts calls at runtime.
 - **Tailwind `output.css` is pre-compiled** — `node_modules/` only needed if rebuilding CSS.

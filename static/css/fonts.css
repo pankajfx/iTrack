@@ -22,3 +22,30 @@ h1, h2, h3, h4, h5, h6, .font-fjalla {
     font-family: 'Fjalla One', sans-serif;
     letter-spacing: 0.02em;
 }
+
+/* Inter (variable font, weights 300-800) */
+@font-face {
+    font-family: 'Inter';
+    src: url('../fonts/Inter-Variable.woff2') format('woff2');
+    font-weight: 300 800;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* Manrope (variable font, weights 400-800) */
+@font-face {
+    font-family: 'Manrope';
+    src: url('../fonts/Manrope-Variable.woff2') format('woff2');
+    font-weight: 400 800;
+    font-style: normal;
+    font-display: swap;
+}
+
+/* Outfit (variable font, weights 500-700) */
+@font-face {
+    font-family: 'Outfit';
+    src: url('../fonts/Outfit-Variable.woff2') format('woff2');
+    font-weight: 500 700;
+    font-style: normal;
+    font-display: swap;
+}

@@ -334,7 +334,7 @@
 
     function renderMessageContent(msg) {
         if (msg.type === 'image') {
-            if (msg.file_url && msg.file_url.startsWith('data:image/')) {
+            if (msg.file_url) {
                 return `<img src="${msg.file_url}" class="chat-image" alt="Shared image"
                     onclick="viewFullImage('${msg._id}')" onerror="${IMG_ERROR_FALLBACK}">`;
             }
@@ -499,6 +499,7 @@
                     body: JSON.stringify({
                         message: caption,
                         type: 'image',
+                        media: uploadData.media,       // GridFS reference
                         file_url: uploadData.file_url
                     })
                 });
@@ -623,6 +624,7 @@
                     body: JSON.stringify({
                         message: '',
                         type: 'audio',
+                        media: uploadData.media,
                         file_url: uploadData.file_url,
                         duration: durationSeconds || 0
                     })
@@ -831,6 +833,7 @@
                     body: JSON.stringify({
                         message: caption,
                         type: 'image',
+                        media: uploadData.media,
                         file_url: uploadData.file_url
                     })
                 });

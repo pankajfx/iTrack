@@ -836,7 +836,10 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
 
     async function loadInstallations() {
         try {
-            const response = await fetch('/api/trackers/all-fe');
+            // limit=0 keeps the full list: KPIs, drill-downs and search all read
+            // from allInstallations. The heavy image blobs are gone server-side
+            // (TRACKER_LIST_PROJECTION), which is where the payload win comes from.
+            const response = await fetch('/api/trackers/all-fe?limit=0');
             if (!response.ok) {
                 const errorText = await response.text();
                 console.error('API Error Response:', errorText);
@@ -908,6 +911,7 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
     function setDateRange(range) {
         currentRange = range;
         currentPage = 1;
+        loadBadgeCounts();
 
         // Debug: Uncomment to troubleshoot date range issues
         // console.log('Setting date range:', range);
@@ -1105,6 +1109,47 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
         
         // Update badge counters
         updateBadges();
+    }
+
+    // Badge counts straight from the server: index-only, a few hundred bytes, and
+    // independent of the list download. Called before loadInstallations() so the
+    // tabs populate immediately instead of after the full payload parses.
+    async function loadBadgeCounts() {
+        try {
+            const qs = new URLSearchParams();
+            const r = dateRangeBounds();
+            if (r.from) qs.set('from', r.from);
+            if (r.to)   qs.set('to', r.to);
+            const res = await fetch('/api/trackers/counts' + (qs.toString() ? '?' + qs : ''));
+            if (!res.ok) return;
+            const c = await res.json();
+            applyBadges(c.unassigned_me, c.unassigned_overall, c.ongoing_me,
+                        c.completed_me, c.ongoing_overall, c.completed_overall);
+        } catch (e) {
+            // Non-fatal: updateBadges() recomputes from the list once it lands.
+            console.warn('Badge counts unavailable, falling back to list:', e);
+        }
+    }
+
+    // Reuses getDateRange() so the server-side counts and the client-side filter
+    // can never drift apart. FE role is exempt from date filtering, matching
+    // isInDateRange().
+    function dateRangeBounds() {
+        if ('{{ session.role }}' === 'FIELD_ENGINEER') return {};
+        const { from, to } = getDateRange();
+        return { from: from.toISOString().slice(0, 19),
+                 to:   to.toISOString().slice(0, 19) };
+    }
+
+    function applyBadges(unassignedMeCount, unassignedOverallCount, ongoingMeCount,
+                         completedMeCount, ongoingOverallCount, completedOverallCount) {
+        const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.textContent = v; };
+        set('badge-unassigned-me', unassignedMeCount);
+        set('badge-unassigned-overall', unassignedOverallCount);
+        set('badge-ongoing-me', ongoingMeCount);
+        set('badge-completed-me', completedMeCount);
+        set('badge-ongoing-overall', ongoingOverallCount);
+        set('badge-completed-overall', completedOverallCount);
     }
 
     function updateBadges() {
@@ -2414,11 +2459,14 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
         }
     }
 
-    // Load installations on page load
+    // Badges first - they are a few hundred bytes off an index, so the tabs fill
+    // immediately rather than waiting on the full list download.
+    loadBadgeCounts();
     loadInstallations();
 
-    // Refresh every 30 seconds
-    setInterval(loadInstallations, 30000);
+    // Safety-net reconcile. Socket.IO carries live updates; this only covers a
+    // missed event or a dropped connection, so it can be slow.
+    setInterval(function () { loadBadgeCounts(); loadInstallations(); }, 120000);
 
     // ─── Socket.IO Setup ─────────────────────────────────────────────────────────
     let reloadTimeout = null;

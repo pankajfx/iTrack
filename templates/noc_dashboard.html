@@ -383,7 +383,9 @@
     async function loadTrackers() {
         try {
             // Fetch all trackers (unassigned + all assigned)
-            const response = await fetch('/api/trackers/all-noc');
+            // limit=0: KPIs, search and drill-downs read from the in-memory list. The
+            // payload win comes from TRACKER_LIST_PROJECTION dropping image blobs.
+            const response = await fetch('/api/trackers/all-noc?limit=0');
             const data = await response.json();
             
             allTrackers = data.trackers || [];
@@ -1034,7 +1036,7 @@
     loadTrackers();
 
     // Refresh every 30 seconds
-    setInterval(loadTrackers, 30000);
+    setInterval(loadTrackers, 120000);   // safety net only - Socket.IO carries live updates
 
     // ─── Reassignment Requests Functions ────────────────────────────────────
     let reassignmentRequests = [];
@@ -1174,7 +1176,7 @@
     loadReassignmentRequests();
 
     // Refresh reassignment requests every 30 seconds
-    setInterval(loadReassignmentRequests, 30000);
+    setInterval(loadReassignmentRequests, 120000);  // safety net only
 
     // NOC Users Modal functions (for NOC Support Group role)
     let nocUsersData = [];

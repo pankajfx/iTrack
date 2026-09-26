@@ -4,6 +4,11 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.security import check_password_hash, generate_password_hash
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
+from pymongo import ReturnDocument
+import gridfs
+import base64
+import re
+from pymongo.errors import DuplicateKeyError
 import os
 from functools import wraps
 from dotenv import load_dotenv
@@ -19,8 +24,16 @@ app.config['MONGO_URI'] = os.environ.get('MONGO_URI', 'mongodb://localhost:27017
 # app.config['MONGO_URI'] = os.environ.get('MONGO_URI', 'mongodb://myAdminUser:MyStrongPassword123@localhost:27017/sdwan_tracker?authSource=admin')
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
-app.config['TEMPLATES_AUTO_RELOAD'] = True
-app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+# Development conveniences that cost real bandwidth in production: without them
+# ~300KB of CSS/JS/fonts was revalidated on every page load, per user. Both now
+# follow FLASK_DEBUG. Static URLs are versioned with ?v=<STATIC_VERSION> so a
+# long max-age is still safe to bust on deploy.
+FLASK_DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+app.config['TEMPLATES_AUTO_RELOAD'] = FLASK_DEBUG
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if FLASK_DEBUG else 31536000
+STATIC_VERSION = os.environ.get('STATIC_VERSION') or str(int(os.path.getmtime(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'css', 'output.css'))))
 
 mongo = PyMongo(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
@@ -156,6 +169,104 @@ def inject_config():
         }
     }
 
+def next_tracker_id(year):
+    """Atomically allocate the next per-year tracker number.
+
+    The previous implementation was f"SDWAN-{year}-{count_documents({}) + 1}",
+    which hands the SAME id to two FEs creating a tracker at the same moment,
+    repeats ids after any deletion, and costs an O(n) scan on every create.
+    """
+    doc = mongo.db.counters.find_one_and_update(
+        {'_id': f'tracker_{year}'},
+        {'$inc': {'seq': 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return f"SDWAN-{year}-{doc['seq']:06d}"
+
+
+# ─── Media store (GridFS) ────────────────────────────────────────────────────
+# Photos and voice notes used to live as base64 data URLs INSIDE tracker and chat
+# documents. That made 69% of tracker bytes image data, put every photo into every
+# list response, and re-sent whole media files on every 5-second chat poll
+# (PROJECT_GUIDE section 15.2). They now live in GridFS and documents carry only a
+# reference; clients fetch /api/media/<id> once and the browser caches it.
+#
+# Reads stay backward compatible: a document may still hold an inline `data` /
+# `file_url` data URL. serialize_media_ref() emits a usable URL either way, so the
+# migration (scripts/migrate_media.py) can run at any time, or not at all.
+_DATA_URL_RE = re.compile(r'^data:([^;,]+)(;base64)?,(.*)$', re.S)
+
+def _gridfs():
+    return gridfs.GridFS(mongo.db, collection='media')
+
+
+def store_data_url(data_url, tracker_id=None, kind=None):
+    """Persist a data: URL into GridFS. Returns (file_id, mime, size) or None."""
+    if not data_url or not isinstance(data_url, str):
+        return None
+    m = _DATA_URL_RE.match(data_url)
+    if not m:
+        return None
+    mime, is_b64, payload = m.group(1), bool(m.group(2)), m.group(3)
+    try:
+        raw = base64.b64decode(payload) if is_b64 else payload.encode('utf-8')
+    except Exception:
+        return None
+    file_id = _gridfs().put(raw, contentType=mime,
+                            metadata={'tracker_id': tracker_id, 'kind': kind})
+    return {'file_id': str(file_id), 'mime': mime, 'size': len(raw)}
+
+
+def media_url(file_id):
+    return f'/api/media/{file_id}'
+
+
+def serialize_media_ref(ref):
+    """Normalise a stored media reference to something the client can render.
+
+    Accepts the new shape ({file_id, mime, size}) and the legacy inline shape
+    ({data: 'data:...'} / a bare data URL string), so old documents keep working.
+    """
+    if not ref:
+        return None
+    if isinstance(ref, str):
+        return {'url': ref, 'inline': True}
+    if ref.get('file_id'):
+        out = {'url': media_url(ref['file_id']), 'file_id': ref['file_id'],
+               'mime': ref.get('mime'), 'size': ref.get('size'), 'inline': False}
+        return {k: v for k, v in out.items() if v is not None}
+    if ref.get('data'):
+        return {'url': ref['data'], 'inline': True}
+    return None
+
+
+def bootstrap_tracker_counters():
+    """Seed the per-year counters from ids already in the collection.
+
+    Without this the first allocation after deploying the atomic counter would
+    return SDWAN-<year>-000001 and collide with existing trackers. Uses $max, so
+    it is idempotent and safe to run from every worker on start.
+    """
+    try:
+        rows = mongo.db.trackers.aggregate([
+            {'$match': {'tracker_id': {'$regex': r'^SDWAN-\d{4}-\d+$'}}},
+            {'$project': {
+                'year': {'$substrBytes': ['$tracker_id', 6, 4]},
+                'seq': {'$toInt': {'$substrBytes': ['$tracker_id', 11, -1]}},
+            }},
+            {'$group': {'_id': '$year', 'max': {'$max': '$seq'}}},
+        ])
+        for row in rows:
+            mongo.db.counters.update_one(
+                {'_id': f"tracker_{row['_id']}"},
+                {'$max': {'seq': row['max']}},
+                upsert=True,
+            )
+    except Exception as exc:                       # never block startup on this
+        print(f"[startup] tracker counter bootstrap skipped: {exc}")
+
+
 def get_utc_now():
     """Return the current time as a naive UTC datetime.
     MongoDB stores datetimes as UTC by default; using naive datetimes
@@ -207,6 +318,52 @@ def login_required(f):
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+@app.route('/api/media/<file_id>')
+@login_required
+def api_get_media(file_id):
+    """Serve one stored media file.
+
+    Immutable content addressed by id, so it is safe to cache hard. `private`
+    because it is behind a session - a shared cache must not keep it.
+    """
+    try:
+        oid = ObjectId(file_id)
+    except Exception:
+        return jsonify({'error': 'Bad media id'}), 400
+    try:
+        f = _gridfs().get(oid)
+    except gridfs.NoFile:
+        return jsonify({'error': 'Not found'}), 404
+
+    resp = app.response_class(f.read(), mimetype=f.content_type or 'application/octet-stream')
+    resp.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
+    resp.headers['Content-Length'] = str(f.length)
+    return resp
+
+
+def offload_image_field(data_url, kind, tracker_id=None):
+    """Data URL -> GridFS reference, falling back to inline on failure.
+
+    Returning the inline shape on failure means a storage hiccup degrades to the
+    old behaviour rather than losing the engineer's photo.
+    """
+    stored = store_data_url(data_url, tracker_id=tracker_id, kind=kind)
+    return stored if stored else {'data': data_url}
+
+
+def offload_site_images(images, tracker_id=None):
+    """Offload a site_verification.images list, preserving gps/type/captured_at."""
+    out = []
+    for img in images or []:
+        if not isinstance(img, dict):
+            continue
+        entry = {k: v for k, v in img.items() if k != 'data'}
+        if img.get('data'):
+            entry.update(offload_image_field(img['data'], 'site_verification', tracker_id))
+        out.append(entry)
+    return out
 
 
 def is_chat_unlocked(tracker):
@@ -488,57 +645,129 @@ def api_check_sdwan_id(sdwan_id):
     return jsonify({'exists': False})
 
 
+def resolve_tracker_media(tracker):
+    """Rewrite every stored image reference into a URL the client can use.
+
+    Handles both shapes - a GridFS reference becomes /api/media/<id>, a legacy
+    inline data URL is passed through unchanged - so the frontend has exactly one
+    thing to render (`data`) regardless of when the tracker was created.
+    """
+    def fix_list(images):
+        for img in images or []:
+            if isinstance(img, dict):
+                ref = serialize_media_ref(img)
+                if ref:
+                    img['data'] = ref['url']
+                    img['inline'] = ref.get('inline', False)
+        return images
+
+    fix_list((tracker.get('site_verification') or {}).get('images'))
+    for key in ('sim1', 'sim2'):
+        fix_list(((tracker.get('sim') or {}).get(key) or {}).get('images'))
+    fix_list((tracker.get('firmware') or {}).get('images'))
+    fix_list((tracker.get('router') or {}).get('images'))
+    return tracker
+
+
 @app.route('/api/trackers/<tracker_id>')
 @login_required
 def api_get_tracker(tracker_id):
-    import time
-    start_time = time.time()
-    
     tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
-    query_time = time.time() - start_time
-    
     if not tracker:
         return jsonify({'error': 'Tracker not found'}), 404
-    
+
     can_interact = True
     if session.get('role') == ROLE_FE:
         can_interact = (tracker.get('fe', {}).get('id') == session['user_id'])
-    
-    serialize_start = time.time()
-    result = {'tracker': serialize_doc(tracker), 'can_interact': can_interact}
-    serialize_time = time.time() - serialize_start
-    total_time = time.time() - start_time
-    
-    print(f"[API Performance] GET /api/trackers/{tracker_id}: Query={query_time*1000:.1f}ms, Serialize={serialize_time*1000:.1f}ms, Total={total_time*1000:.1f}ms")
-    
-    return jsonify(result)
+
+    return jsonify({
+        'tracker': resolve_tracker_media(serialize_doc(tracker)),
+        'can_interact': can_interact,
+    })
+
+
+# ─── Tracker list plumbing ───────────────────────────────────────────────────
+# Dashboards render IDs, statuses and timers - never embedded photos or the event
+# timeline. Without this projection every list response carried the full base64
+# payload of every photo in the result set (69% of tracker bytes; see
+# PROJECT_GUIDE section 15.2). Detail views fetch the whole document separately.
+TRACKER_LIST_PROJECTION = {
+    'site_verification.images': 0,
+    'sim.sim1.images': 0,
+    'sim.sim2.images': 0,
+    'firmware.images': 0,
+    'router.images': 0,
+    'events': 0,
+}
+
+DEFAULT_PAGE_SIZE = 50
+MAX_PAGE_SIZE     = 200
+
+
+def fe_visibility_query():
+    """Mongo filter for what the current FE-side user may see.
+
+    Single source of truth so the list, the counts and pagination can never
+    disagree. Returns None when the role has no FE-side visibility at all.
+    """
+    role = session.get('role')
+    if role == ROLE_FE:
+        return {'fe.id': session['user_id']}
+    if role == ROLE_FEG:
+        return {'fe.field_engineer_group': session.get('field_engineer_group')}
+    if role == ROLE_FS:
+        # FS sees every FEG sitting under them.
+        fegs = mongo.db.users.find({'role': ROLE_FEG, 'field_support': session.get('field_support')},
+                                   {'name': 1})
+        names = [f['name'] for f in fegs if 'name' in f]
+        return {'fe.field_engineer_group': {'$in': names}} if names else None
+    if role == ROLE_FSG:
+        return {}
+    return None
+
+
+def paginate_args():
+    """(skip, limit) from ?page=&limit=, clamped. limit=0 means 'everything'."""
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except ValueError:
+        page = 1
+    raw = request.args.get('limit')
+    if raw is None:
+        limit = DEFAULT_PAGE_SIZE
+    else:
+        try:
+            limit = int(raw)
+        except ValueError:
+            limit = DEFAULT_PAGE_SIZE
+        limit = 0 if limit <= 0 else min(limit, MAX_PAGE_SIZE)
+    return (page - 1) * limit, limit
+
+
+def tracker_page(query, sort_dir=-1):
+    """Projected, sorted, paginated tracker list + the total for that query."""
+    skip, limit = paginate_args()
+    cursor = mongo.db.trackers.find(query, TRACKER_LIST_PROJECTION).sort('created_at', sort_dir)
+    if limit:
+        cursor = cursor.skip(skip).limit(limit)
+    trackers = list(cursor)
+    total = mongo.db.trackers.count_documents(query)
+    return {
+        'trackers': serialize_doc(trackers),
+        'total': total,
+        'returned': len(trackers),
+        'has_more': bool(limit) and (skip + len(trackers)) < total,
+    }
 
 
 @app.route('/api/trackers/all-fe')
 @login_required
 def api_all_fe():
-    """Return trackers visible to the current FE-side user based on hierarchy."""
-    role = session.get('role')
-    if role == ROLE_FE:
-        trackers = list(mongo.db.trackers.find({'fe.id': session['user_id']}).sort('created_at', -1))
-    elif role == ROLE_FEG:
-        feg = session.get('field_engineer_group')
-        trackers = list(mongo.db.trackers.find({'fe.field_engineer_group': feg}).sort('created_at', -1))
-    elif role == ROLE_FS:
-        # FS sees all trackers from FEGs under their region
-        fs = session.get('field_support')
-        # Get all FEG names under this FS
-        feg_users = list(mongo.db.users.find({'role': ROLE_FEG, 'field_support': fs}, {'name': 1}))
-        fegs = [feg['name'] for feg in feg_users if 'name' in feg]
-        if fegs:
-            trackers = list(mongo.db.trackers.find({'fe.field_engineer_group': {'$in': fegs}}).sort('created_at', -1))
-        else:
-            trackers = []
-    elif role == ROLE_FSG:
-        trackers = list(mongo.db.trackers.find().sort('created_at', -1))
-    else:
-        trackers = []
-    return jsonify({'trackers': serialize_doc(trackers)})
+    """Trackers visible to the current FE-side user, by hierarchy."""
+    query = fe_visibility_query()
+    if query is None:
+        return jsonify({'trackers': [], 'total': 0, 'returned': 0, 'has_more': False})
+    return jsonify(tracker_page(query))
 
 
 @app.route('/api/trackers/all-noc')
@@ -546,8 +775,7 @@ def api_all_fe():
 def api_all_noc_trackers():
     if session.get('role') not in NOC_ROLES:
         return jsonify({'error': 'Unauthorized'}), 403
-    trackers = list(mongo.db.trackers.find().sort('created_at', -1))
-    return jsonify({'trackers': serialize_doc(trackers)})
+    return jsonify(tracker_page({}))
 
 
 @app.route('/api/trackers/unassigned')
@@ -555,10 +783,8 @@ def api_all_noc_trackers():
 def api_unassigned_trackers():
     if session.get('role') != ROLE_NS:
         return jsonify({'error': 'Unauthorized'}), 403
-    trackers = list(
-        mongo.db.trackers.find({'noc_assignee': None, 'status': 'waiting_noc_assignment'}).sort('created_at', 1)
-    )
-    return jsonify({'trackers': serialize_doc(trackers)})
+    return jsonify(tracker_page({'noc_assignee': None, 'status': STATUS_WAITING_NOC},
+                                sort_dir=1))
 
 
 @app.route('/api/trackers/my-installations')
@@ -566,12 +792,84 @@ def api_unassigned_trackers():
 def api_my_installations():
     role = session.get('role')
     if role == ROLE_FE:
-        trackers = list(mongo.db.trackers.find({'fe.id': session['user_id']}).sort('created_at', -1).limit(50))
+        query = {'fe.id': session['user_id']}
     elif role == ROLE_NS:
-        trackers = list(mongo.db.trackers.find({'noc_assignee': session['user_id']}).sort('created_at', -1))
+        query = {'noc_assignee': session['user_id']}
     else:
-        trackers = []
-    return jsonify({'trackers': serialize_doc(trackers)})
+        return jsonify({'trackers': [], 'total': 0, 'returned': 0, 'has_more': False})
+    return jsonify(tracker_page(query))
+
+
+@app.route('/api/trackers/counts')
+@login_required
+def api_tracker_counts():
+    """The six dashboard badge counts, in one aggregation.
+
+    These used to be six client-side passes over the whole tracker list, so the
+    tabs could not render until a multi-megabyte payload had downloaded and
+    parsed - the "landing page takes forever to show counts" symptom
+    (PROJECT_GUIDE section 15.2, cause 4). This answers off the indexes in a few
+    hundred bytes.
+
+    Query params: from / to (ISO dates, inclusive) mirror the dashboard's range
+    picker. Ranges apply to created_at, except for completed which uses
+    completed_at - matching the client logic exactly.
+    """
+    role = session.get('role')
+    if role in NOC_ROLES:
+        scope = {}
+        mine = {'noc_assignee': session['user_id']}
+    else:
+        scope = fe_visibility_query()
+        mine = {'fe.id': session['user_id']}
+    if scope is None:
+        return jsonify({'total': 0})
+
+    def parse(param):
+        raw = request.args.get(param)
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace('Z', ''))
+        except ValueError:
+            return None
+
+    frm, to = parse('from'), parse('to')
+
+    def ranged(field):
+        if frm is None and to is None:
+            return {}
+        bounds = {}
+        if frm is not None:
+            bounds['$gte'] = frm
+        if to is not None:
+            bounds['$lte'] = to
+        return {field: bounds}
+
+    done_states     = [STATUS_COMPLETE, 'completed']
+    not_started     = STATUS_WAITING_NOC
+    ongoing_exclude = done_states + [not_started]
+
+    buckets = {
+        'unassigned_overall': {'status': not_started, **ranged('created_at')},
+        'unassigned_me':      {'status': not_started, **mine, **ranged('created_at')},
+        'ongoing_overall':    {'status': {'$nin': ongoing_exclude}, **ranged('created_at')},
+        'ongoing_me':         {'status': {'$nin': ongoing_exclude}, **mine, **ranged('created_at')},
+        'completed_overall':  {'status': {'$in': done_states}, **ranged('completed_at')},
+        'completed_me':       {'status': {'$in': done_states}, **mine, **ranged('completed_at')},
+    }
+
+    # $facet runs every bucket in a single pass instead of six round trips.
+    facet = {name: [{'$match': q}, {'$count': 'n'}] for name, q in buckets.items()}
+    result = next(iter(mongo.db.trackers.aggregate([{'$match': scope}, {'$facet': facet}])), {})
+    counts = {name: (rows[0]['n'] if rows else 0) for name, rows in result.items()}
+
+    by_status = mongo.db.trackers.aggregate([
+        {'$match': scope}, {'$group': {'_id': '$status', 'n': {'$sum': 1}}},
+    ])
+    counts['by_status'] = {r['_id']: r['n'] for r in by_status}
+    counts['total'] = sum(counts['by_status'].values())
+    return jsonify(counts)
 
 
 @app.route('/api/noc/users/stats')
@@ -579,25 +877,31 @@ def api_my_installations():
 def api_noc_users_stats():
     if session.get('role') != ROLE_NSG:
         return jsonify({'error': 'Unauthorized'}), 403
-    noc_users = list(mongo.db.users.find({'role': ROLE_NS}))
+    noc_users = list(mongo.db.users.find({'role': ROLE_NS}, {'name': 1, 'username': 1}))
+
+    # One pass over the index instead of 2 x N count_documents() round trips.
+    tallies = {}
+    for row in mongo.db.trackers.aggregate([
+        {'$match': {'noc_assignee': {'$ne': None}}},
+        {'$group': {'_id': {'assignee': '$noc_assignee',
+                            'done': {'$eq': ['$status', STATUS_COMPLETE]}},
+                    'n': {'$sum': 1}}},
+    ]):
+        key = row['_id']['assignee']
+        bucket = tallies.setdefault(key, {'ongoing': 0, 'completed': 0})
+        bucket['completed' if row['_id']['done'] else 'ongoing'] += row['n']
+
     users_stats = []
     for user in noc_users:
         user_id = str(user['_id'])
-        ongoing_count = mongo.db.trackers.count_documents({
-            'noc_assignee': user_id,
-            'status': {'$ne': 'installation_complete'}
-        })
-        completed_count = mongo.db.trackers.count_documents({
-            'noc_assignee': user_id,
-            'status': 'installation_complete'
-        })
+        t = tallies.get(user_id, {'ongoing': 0, 'completed': 0})
         users_stats.append({
             'id': user_id,
             'name': user.get('name', 'N/A'),
             'username': user.get('username', 'N/A'),
-            'ongoing_count': ongoing_count,
-            'completed_count': completed_count,
-            'total_count': ongoing_count + completed_count
+            'ongoing_count': t['ongoing'],
+            'completed_count': t['completed'],
+            'total_count': t['ongoing'] + t['completed'],
         })
     return jsonify({'users': users_stats})
 
@@ -814,8 +1118,10 @@ def api_create_tracker():
         provider = data.get(provider_key, '')
         number   = data.get(number_key, '')
         images   = [
-            {'field': 'provider', 'data': captured_images[provider_key]} if captured_images.get(provider_key) else None,
-            {'field': 'number',   'data': captured_images[number_key]}   if captured_images.get(number_key)   else None,
+            dict(field='provider', **offload_image_field(captured_images[provider_key], 'sim'))
+            if captured_images.get(provider_key) else None,
+            dict(field='number', **offload_image_field(captured_images[number_key], 'sim'))
+            if captured_images.get(number_key) else None,
         ]
         return {
             'provider': provider,
@@ -831,7 +1137,7 @@ def api_create_tracker():
 
     tracker = {
         # ── Identity ──────────────────────────────────────────────────────
-        'tracker_id': f"SDWAN-{now.year}-{mongo.db.trackers.count_documents({}) + 1:06d}",
+        'tracker_id': next_tracker_id(now.year),
         'sdwan_id': data['sdwan_id'],
         'customer': data['customer'],
         'site_name': data.get('site_name', ''),
@@ -870,14 +1176,16 @@ def api_create_tracker():
             'type': data.get('router_type', ''),
             'make': data.get('router_make', ''),
             'firmware_version': data.get('router_firmware_version', ''),
-            'images': [{'field': 'firmware', 'data': captured_images['router_firmware_version']}]
+            'images': [dict(field='firmware',
+                            **offload_image_field(captured_images['router_firmware_version'], 'firmware'))]
                       if captured_images.get('router_firmware_version') else []
         },
 
         # ── Firmware + ZTP ────────────────────────────────────────────────
         'firmware': {
             'version': data.get('router_firmware_version', ''),
-            'images': [{'field': 'version', 'data': captured_images['router_firmware_version']}]
+            'images': [dict(field='version',
+                            **offload_image_field(captured_images['router_firmware_version'], 'firmware'))]
                       if captured_images.get('router_firmware_version') else []
         },
         'ztp': {
@@ -918,7 +1226,8 @@ def api_create_tracker():
         # excluded from NOC queue-wait KPI (queue wait = confirmed_at → assigned_at).
         'site_verification': {
             'status': 'pending',          # pending | confirmed | rejected
-            'images': data.get('site_images', []),  # [{type, data, gps:{lat,lng,address}, captured_at}]
+            # [{type, file_id|data, mime, size, gps:{lat,lng,address}, captured_at}]
+            'images': offload_site_images(data.get('site_images', [])),
             'noc_reviewed_at': None,
             'noc_reviewed_by': None,
             'noc_reviewer_name': None,
@@ -961,7 +1270,15 @@ def api_create_tracker():
         'completed_at': None,
     }
 
-    result = mongo.db.trackers.insert_one(tracker)
+    try:
+        result = mongo.db.trackers.insert_one(tracker)
+    except DuplicateKeyError:
+        # The pre-check above is check-then-insert, so two concurrent creates for
+        # the same SDWAN ID both pass it. trackers_sdwan_id_unique is the real
+        # guard; surface it as the same 409 rather than a 500.
+        existing = mongo.db.trackers.find_one({'sdwan_id': data['sdwan_id']})
+        return jsonify({'success': False, 'message': 'SDWAN ID already exists',
+                        'tracker_id': str(existing['_id']) if existing else None}), 409
     tracker['_id'] = result.inserted_id
     
     # Broadcast new tracker creation to all dashboards
@@ -1178,6 +1495,7 @@ def api_site_verify_resubmit(tracker_id):
     new_images = data.get('site_images', [])
     if len(new_images) < 3:
         return jsonify({'error': 'All 3 site photos are required'}), 400
+    new_images = offload_site_images(new_images, tracker_id)
 
     now = get_utc_now()
 
@@ -2378,9 +2696,42 @@ def api_get_chat_messages(tracker_id):
     elif user_role in (ROLE_FEG, ROLE_FS, ROLE_FSG):
         can_interact = False  # Hierarchy supervisors are read-only
 
-    messages = list(mongo.db.chat_messages.find({'tracker_id': tracker_id}).sort('timestamp', 1))
+    # ?since=<iso> returns only what the client does not already hold, and media
+    # is never inlined - each message carries a /api/media/<id> URL the browser
+    # fetches once and caches. The old endpoint re-sent every message in the
+    # thread, with every photo and voice note inline, every 5 seconds: measured at
+    # 2.2MB per poll on the heaviest thread (PROJECT_GUIDE section 15.2).
+    query = {'tracker_id': tracker_id}
+    since = request.args.get('since')
+    if since:
+        try:
+            query['timestamp'] = {'$gt': datetime.fromisoformat(since.replace('Z', ''))}
+        except ValueError:
+            pass
+
+    try:
+        limit = min(int(request.args.get('limit', 200)), 500)
+    except ValueError:
+        limit = 200
+
+    cursor = mongo.db.chat_messages.find(query).sort('timestamp', -1).limit(limit)
+    messages = list(cursor)[::-1]          # newest-first for the limit, then chronological
+    total = mongo.db.chat_messages.count_documents({'tracker_id': tracker_id})
+
+    payload = []
+    for m in serialize_doc(messages):
+        media = serialize_media_ref(m.get('media') or m.get('file_url'))
+        m.pop('file_url', None)
+        m.pop('media', None)
+        if media:
+            m['file_url'] = media['url']   # field name kept for client compatibility
+            m['media_inline'] = media.get('inline', False)
+        payload.append(m)
+
     return jsonify({
-        'messages': serialize_doc(messages),
+        'messages': payload,
+        'total': total,
+        'incremental': bool(since),
         'chat_unlocked': is_chat_unlocked(tracker),
         'can_interact': can_interact
     })
@@ -2406,12 +2757,20 @@ def api_send_chat_message(tracker_id):
     message_text = data.get('message', '').strip()
     message_type = data.get('type', 'text')
     file_url     = data.get('file_url')
+    media        = data.get('media')          # {file_id, mime, size} from /chat/upload
+
+    # A client that still posts an inline data URL gets it offloaded here rather
+    # than stored in the document.
+    if media is None and file_url and file_url.startswith('data:'):
+        media = store_data_url(file_url, tracker_id=tracker_id, kind=message_type)
+        if media:
+            file_url = None
     try:
         duration = float(data.get('duration')) if data.get('duration') is not None else None
     except (TypeError, ValueError):
         duration = None
 
-    if not message_text and not file_url:
+    if not message_text and not file_url and not media:
         return jsonify({'error': 'Message or file required'}), 400
 
     now = get_utc_now()
@@ -2423,8 +2782,9 @@ def api_send_chat_message(tracker_id):
         'sender_name': sender_name,
         'message': message_text,
         'type': message_type,
-        'file_url': file_url,
-        'duration': duration,      # seconds, audio only — see api_send_chat_message
+        'media': media,            # {file_id, mime, size} - served via /api/media/<id>
+        'file_url': file_url,      # legacy inline fallback; None for new messages
+        'duration': duration,      # seconds, audio only - see api_send_chat_message
         'timestamp': now,
         'read': False
     }
@@ -2500,13 +2860,17 @@ def api_upload_chat_file(tracker_id):
     else:
         mime_type = file.content_type or 'application/octet-stream'
 
-    b64 = base64.b64encode(file_data).decode('utf-8')
-    file_url = f"data:{mime_type};base64,{b64}"
+    if len(file_data) > 10 * 1024 * 1024:
+        return jsonify({'error': 'File too large. Use a smaller file.'}), 400
 
-    if len(file_url) > 10 * 1024 * 1024:
-        return jsonify({'error': 'File too large after encoding. Use a smaller file.'}), 400
-
-    return jsonify({'success': True, 'file_url': file_url, 'type': file_type})
+    file_id = _gridfs().put(file_data, contentType=mime_type,
+                            metadata={'tracker_id': tracker_id, 'kind': file_type})
+    return jsonify({
+        'success': True,
+        'type': file_type,
+        'media': {'file_id': str(file_id), 'mime': mime_type, 'size': len(file_data)},
+        'file_url': media_url(file_id),    # what the client sets as src
+    })
 
 
 @app.route('/api/trackers/<tracker_id>/chat/mark-read', methods=['POST'])
@@ -3514,11 +3878,22 @@ def broadcast_tracker_update(tracker_id, event_type, data, include_full_tracker=
     socketio.emit('tracker_update', payload, room=f"tracker_{tracker_id}")
 
 def broadcast_chat_message(tracker_id, message):
-    """Broadcast new chat message to all users in tracker room"""
-    print(f"[Socket.IO] Broadcasting new_chat_message: tracker_id={tracker_id}")
+    """Broadcast a new chat message to everyone in the tracker room.
+
+    Media goes out as a /api/media/<id> URL, never as bytes - a broadcast reaches
+    every connected client, so inlining a voice note here multiplied it by the
+    room size.
+    """
+    payload = serialize_doc(dict(message))
+    ref = serialize_media_ref(payload.get('media') or payload.get('file_url'))
+    payload.pop('media', None)
+    payload.pop('file_url', None)
+    if ref:
+        payload['file_url'] = ref['url']
+        payload['media_inline'] = ref.get('inline', False)
     socketio.emit('new_chat_message', {
         'tracker_id': tracker_id,
-        'message': serialize_doc(message)
+        'message': payload,
     }, room=f"tracker_{tracker_id}")
 
 def broadcast_dashboard_update(role, event_type, data):
@@ -3540,7 +3915,9 @@ def broadcast_to_user(user_id, event_type, data):
 if __name__ == '__main__':
     # eventlet.monkey_patch() at module top gives Flask-SocketIO native WebSocket
     # support. socketio.run() uses eventlet's WSGI server — no Waitress/Gunicorn needed.
-    debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+    debug = FLASK_DEBUG
     port = int(os.environ.get('PORT', 5001))
+    with app.app_context():
+        bootstrap_tracker_counters()
     socketio.run(app, debug=debug, host='0.0.0.0', port=port)
 

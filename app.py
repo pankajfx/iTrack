@@ -220,6 +220,23 @@ def next_tracker_id(year):
 # migration (scripts/migrate_media.py) can run at any time, or not at all.
 _DATA_URL_RE = re.compile(r'^data:([^;,]+)(;base64)?,(.*)$', re.S)
 
+# Media types safe to serve inline from our origin. Types arrive from the client
+# (data URL prefixes, multipart content types) and are never trusted as-is:
+# text/html and image/svg+xml both carry script, and serving either inline from
+# /api/media would run it on this origin. Anything off this list is stored and
+# served as an opaque download.
+INLINE_MEDIA_TYPES = {
+    'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp',
+    'image/heic', 'image/heif',
+    'audio/webm', 'audio/mp4', 'audio/ogg', 'audio/mpeg', 'audio/wav',
+    'audio/x-wav', 'audio/aac', 'audio/x-m4a',
+}
+
+
+def safe_media_type(mime):
+    mime = (mime or '').split(';')[0].strip().lower()
+    return mime if mime in INLINE_MEDIA_TYPES else 'application/octet-stream'
+
 def _gridfs():
     return gridfs.GridFS(mongo.db, collection='media')
 
@@ -231,7 +248,7 @@ def store_data_url(data_url, tracker_id=None, kind=None):
     m = _DATA_URL_RE.match(data_url)
     if not m:
         return None
-    mime, is_b64, payload = m.group(1), bool(m.group(2)), m.group(3)
+    mime, is_b64, payload = safe_media_type(m.group(1)), bool(m.group(2)), m.group(3)
     try:
         raw = base64.b64decode(payload) if is_b64 else payload.encode('utf-8')
     except Exception:
@@ -360,9 +377,16 @@ def api_get_media(file_id):
     except gridfs.NoFile:
         return jsonify({'error': 'Not found'}), 404
 
-    resp = app.response_class(f.read(), mimetype=f.content_type or 'application/octet-stream')
+    # Re-checked at serve time as well, so media stored before the write-side
+    # check existed is covered too.
+    mime = safe_media_type(f.content_type)
+    resp = app.response_class(f.read(), mimetype=mime)
     resp.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
     resp.headers['Content-Length'] = str(f.length)
+    resp.headers['X-Content-Type-Options'] = 'nosniff'
+    resp.headers['Content-Security-Policy'] = "default-src 'none'; sandbox"
+    if mime == 'application/octet-stream':
+        resp.headers['Content-Disposition'] = f'attachment; filename="media-{file_id}"'
     return resp
 
 
@@ -3045,6 +3069,7 @@ def api_upload_chat_file(tracker_id):
     if len(file_data) > 10 * 1024 * 1024:
         return jsonify({'error': 'File too large. Use a smaller file.'}), 400
 
+    mime_type = safe_media_type(mime_type)
     file_id = _gridfs().put(file_data, contentType=mime_type,
                             metadata={'tracker_id': tracker_id, 'kind': file_type})
     return jsonify({

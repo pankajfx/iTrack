@@ -24,6 +24,13 @@ Usage (from the project root):
     python scripts/migrate_media.py --dry-run     # report only, writes nothing
     python scripts/migrate_media.py               # perform the migration
     python scripts/migrate_media.py --batch 100   # limit documents touched
+    python scripts/migrate_media.py --gc          # list media no document references
+    python scripts/migrate_media.py --gc --apply  # ...and delete it
+
+Garbage collection: deleting a tracker or chat message leaves its GridFS files
+behind. --gc finds files that no tracker or chat message references and, with
+--apply, removes them. Files younger than --gc-min-age-minutes (default 60) are
+never touched, so an upload whose message has not been posted yet is safe.
 
 Requirements: pymongo, python-dotenv
 """
@@ -168,6 +175,48 @@ def migrate_chat(mig, batch):
     return touched
 
 
+def referenced_media_ids(db):
+    """Every GridFS id any tracker or chat message points at."""
+    ids = set()
+
+    def walk(o):
+        if isinstance(o, dict):
+            if isinstance(o.get('file_id'), str):
+                ids.add(o['file_id'])
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+
+    for t in db.trackers.find({}, {'site_verification': 1, 'sim': 1, 'firmware': 1, 'router': 1}):
+        walk(t)
+    for m in db.chat_messages.find({'media': {'$ne': None}}, {'media': 1}):
+        walk(m)
+    return ids
+
+
+def collect_garbage(db, apply, min_age_minutes):
+    from datetime import datetime, timedelta
+    cutoff = datetime.utcnow() - timedelta(minutes=min_age_minutes)
+    live = referenced_media_ids(db)
+    fs = gridfs.GridFS(db, collection='media')
+    orphans = [f for f in db['media.files'].find({'uploadDate': {'$lt': cutoff}},
+                                                 {'length': 1, 'uploadDate': 1})
+               if str(f['_id']) not in live]
+    print('Media files referenced by a document : %d' % len(live))
+    print('Unreferenced and older than %d min    : %d (%s)'
+          % (min_age_minutes, len(orphans), human(sum(f['length'] for f in orphans))))
+    if not orphans:
+        return
+    if not apply:
+        print('Report only - re-run with --gc --apply to delete them.')
+        return
+    for f in orphans:
+        fs.delete(f['_id'])
+    print('Deleted %d unreferenced media files.' % len(orphans))
+
+
 def main():
     ap = argparse.ArgumentParser(
         description='Move inline base64 media from documents into GridFS.')
@@ -175,10 +224,21 @@ def main():
                     help='Report what would move without writing anything.')
     ap.add_argument('--batch', type=int, default=0,
                     help='Maximum documents to touch per collection (0 = all).')
+    ap.add_argument('--gc', action='store_true',
+                    help='Find GridFS media no document references (see --apply).')
+    ap.add_argument('--apply', action='store_true', help='With --gc: delete what it finds.')
+    ap.add_argument('--gc-min-age-minutes', type=int, default=60,
+                    help='With --gc: never touch files younger than this (default 60).')
     args = ap.parse_args()
 
     client = MongoClient(MONGO_URI)
     db = client.get_default_database()
+
+    if args.gc:
+        print('Database: %s' % db.name)
+        collect_garbage(db, args.apply, args.gc_min_age_minutes)
+        client.close()
+        return
 
     before = db.command('collstats', 'trackers').get('size', 0)
     mig = Migrator(db, args.dry_run)

@@ -10,9 +10,17 @@ holds a single placeholder value for every user.
 
 Two modes:
 
-  full (default)      DESTRUCTIVE — clears the users collection and re-populates
-                      it from the workbook. Passwords are hashed with Werkzeug and
-                      FEG hierarchy (field_support) is derived from region → FS.
+  full (default)      Makes the users collection match the workbook: every sheet
+                      row is upserted BY USERNAME (existing accounts keep their
+                      _id), and accounts absent from the sheet are removed.
+                      Passwords are hashed with Werkzeug and FEG hierarchy
+                      (field_support) is derived from region → FS.
+
+                      It used to delete every user and insert fresh documents.
+                      That gave every account a new _id, and because trackers
+                      store their owners by id (fe.id, noc_assignee), one reseed
+                      orphaned every tracker in the database. If that has
+                      happened, scripts/relink_orphans.py repairs it.
 
   --passwords-only    Non-destructive. Re-hashes each workbook password onto the
                       matching existing user (matched by username) and touches
@@ -42,7 +50,7 @@ from collections import Counter
 from datetime import datetime
 
 from bson import ObjectId
-from pymongo import MongoClient
+from pymongo import MongoClient, UpdateOne
 from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
 
@@ -321,10 +329,13 @@ def main():
     docs = build_user_docs(rows)
     print(f"  Built {len(docs)} user documents")
 
+    sheet_usernames = [d['username'] for d in docs]
     if args.dry_run:
+        existing = db.users.count_documents({'username': {'$in': sheet_usernames}})
+        prune = db.users.count_documents({'username': {'$nin': sheet_usernames}})
         print("")
-        print(f"DRY RUN - would delete {db.users.count_documents({})} user(s) "
-              f"and insert {len(docs)}.")
+        print(f"DRY RUN - would update {existing} existing user(s) in place, "
+              f"create {len(docs) - existing}, and remove {prune} not in the sheet.")
         client.close()
         return
 
@@ -336,13 +347,29 @@ def main():
     # take the default name 'username_1' and then collide with it (IndexOptionsConflict).
     db.users.create_index('username', unique=True, name='users_username_unique')
 
-    print("\nClearing existing users...")
-    deleted = db.users.delete_many({}).deleted_count
-    print(f"  Deleted {deleted} existing user(s)")
+    # Upsert by username so every existing account keeps its _id - see the
+    # module docstring for why delete-and-insert was destructive to trackers.
+    print(f"\nUpserting {len(docs)} users by username...")
+    ops = []
+    for d in docs:
+        d = dict(d)
+        created_at = d.pop('created_at')
+        ops.append(UpdateOne({'username': d['username']},
+                             {'$set': d, '$setOnInsert': {'created_at': created_at}},
+                             upsert=True))
+    result = db.users.bulk_write(ops, ordered=False)
+    print(f"  Updated {result.modified_count}, unchanged "
+          f"{result.matched_count - result.modified_count}, created {result.upserted_count}")
 
-    print(f"Inserting {len(docs)} users...")
-    result = db.users.insert_many(docs)
-    print(f"  Inserted {len(result.inserted_ids)} user(s)")
+    gone = [str(u['_id']) for u in db.users.find({'username': {'$nin': sheet_usernames}}, {'_id': 1})]
+    if gone:
+        still_owned = db.trackers.count_documents(
+            {'$or': [{'fe.id': {'$in': gone}}, {'noc_assignee': {'$in': gone}}]})
+        removed = db.users.delete_many({'_id': {'$in': [ObjectId(g) for g in gone]}}).deleted_count
+        print(f"  Removed {removed} user(s) not in the sheet")
+        if still_owned:
+            print(f"  NOTE: {still_owned} tracker(s) belonged to removed users and now "
+                  f"need reassigning - run scripts/relink_orphans.py to list them.")
 
     # Summary
     counts = Counter(d['role'] for d in docs)

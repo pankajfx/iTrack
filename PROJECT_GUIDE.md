@@ -173,6 +173,7 @@ The **canonical** index setup is `scripts/create_indexes.py` (idempotent; covers
 - **Themes** are injected server-side (`theme_config.py` → `theme_styles.html`) per role.
 - **The login form must carry a username field.** `login.html` picks an account through custom dropdowns, not a text input. With only `autocomplete="current-password"` present, a password manager keys its saved entry to the origin alone and refills the *same* password for every engineer you select — which looks exactly like a wrong-password bug. A visually hidden `autocomplete="username"` input (`#account-username`) is kept in sync with the selection so credentials are scoped per account, and the password box is cleared whenever the selection changes. Keep both if you touch that form.
 - **Image popups go through one shared viewer** — `window.openImageViewer(src, title, filename)` in [base.html](templates/base.html) (markup `#app-image-viewer` + an IIFE right below the toast container). It handles zoom (buttons, wheel, pinch, double-tap), drag-to-pan, Esc/`+`/`-`/`0` keys, background scroll-lock, and download. Callers pass a data URL and a title; the viewer derives the file extension from the data URL's MIME type. **Do not add per-page lightboxes** — call the shared one. Current callers: `showImageModal()` (SIM/firmware, both tracker detail pages), `openSVPhoto(idx)` (NOC site-verification photos), `viewFullImage()` / `window.viewChatImage` (chat images).
+- **Never interpolate user-typed data into HTML raw.** Anything that came from a person - customer, SDWAN ID, names, phones, reasons, search matches - goes through `esc()` inside a template literal, and through `escJs()` when it is an argument inside an inline handler (`onclick="fn(${escJs(x)})"`). HTML-escaping alone is not enough in a handler: the browser decodes `&#39;` back to `'` before the JavaScript is parsed. IDs, dates, counts and internal constants need neither. Prefer `textContent` when building a single node.
 - **Chat bubbles have one renderer.** `renderMessageBubble(msg, currentRole)` in [chat_component.html](templates/chat_component.html) is used by both the API render (`displayMessages`) and the Socket.IO append (`appendNewMessage`). They used to build different markup, so a message changed shape on reload. Add message types there, not in either caller.
 - **Voice notes carry their own duration.** `MediaRecorder` emits a live-stream container with no Duration header, so players report `Infinity` — controls read 0:00, the scrubber is dead and the clip cannot be replayed. Three things address this and all are needed: the client measures the length while recording and sends it as `duration` (stored on the message doc by `api_send_chat_message`); `fixAudioDurations()` seeks past the end to force the browser to resolve the real duration; and the clip's `src` goes on the `<audio>` element rather than a `<source type="...">`, which the browser skips outright when it does not claim to support the declared type. The recorder also picks its container from `MediaRecorder.isTypeSupported` (WebM/Opus on Chrome and Firefox, MP4/AAC on Safari) instead of hardcoding WebM.
 - **Image quality is preserved end to end** — downloads re-wrap the stored bytes as a Blob rather than re-drawing through a canvas, so the saved file is byte-identical to what is stored. Captures are taken at the camera's native stream resolution (canvas sized from `videoWidth`/`videoHeight`, never the displayed size), request `width/height: { ideal: 1920/1080 }` and encode at JPEG `0.95`; chat uploads are re-encoded server-side at max 1920px / quality 95 ([app.py](app.py) `api_upload_chat_file`). Raising these further inflates the inline `data:` URLs that ship on every chat poll and count against Mongo's 16MB document cap.
@@ -196,7 +197,8 @@ The **canonical** index setup is `scripts/create_indexes.py` (idempotent; covers
 - **No CSRF protection** on any state-changing POST (cookie-session auth, SameSite=Lax default only).
 - **Unhardened session cookies.** `SESSION_COOKIE_SECURE` / `SAMESITE` / lifetime are not set — the cookie can ride plain HTTP if the proxy is misconfigured.
 - **NoSQL operator-injection surface.** Request-JSON values are placed directly into Mongo query dicts (login builds `query['name'] = data.get(...)`, [app.py:349-364](app.py#L349)). The password hash check still applies, but object payloads (`{"$ne": null}`) can widen matches — cast query inputs to `str` / validate.
-- **Weak upload validation.** Chat upload stores base64 data URLs; only a naive HTML-sniff on images, audio/other accept client-supplied `content_type` ([app.py:2384-2450](app.py#L2384)) → data-URL XSS + unbounded document growth (16 MB BSON limit).
+- **Weak upload validation.** Audio and non-image uploads, and every data URL a client posts, arrive with a client-chosen content type. *Partly fixed 2026-09-26:* media now lives in GridFS (no document growth), and `safe_media_type()` stores and serves anything outside `INLINE_MEDIA_TYPES` as an `application/octet-stream` attachment, with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox` on every `/api/media` response. Verified: an FE could previously store an HTML or SVG "site photo" whose `/api/media/<id>` link ran script on this origin; it is now an inert download. Still open: no size/dimension limits per media type, and no content sniffing of image bytes.
+- **Stored XSS on dashboards - FIXED 2026-09-26.** Dashboard rows, search results and hierarchy modals interpolated user-typed fields (customer, SDWAN ID, FE and NOC details, transfer reasons) straight into `innerHTML`. Verified exploitable end to end: an FE created a tracker through the normal API whose customer name then executed script in every NOC and supervisor browser that listed or searched it. Both dashboards now route every such value through `esc()`, and values passed into inline handlers through `escJs()` - see [section 7](#7-conventions--code-map). Tracker detail pages were checked with the same payload and were already safe (they use `textContent`).
 - **No security headers** (CSP / HSTS / X-Frame-Options / X-Content-Type-Options) at the app layer, and the proxy configs the ops script generates don't add them either.
 
 ### Remediation checklist (prioritized)
@@ -285,7 +287,9 @@ All live in the tracked **`scripts/`** folder (moved out of the web-served `stat
 | Script | What it does | When to run | When NOT to run |
 |---|---|---|---|
 | `scripts/create_indexes.py` | **Canonical** MongoDB index setup for all collections; idempotent (skips existing). | Once on any fresh/prod DB, and after adding new query patterns. Safe to re-run. | Never harmful. |
-| `scripts/seed_users.py` | **DESTRUCTIVE by default** — clears `users` and repopulates from `scripts/SDWAN Installation Tracker Master User Data.xlsx` (passwords hashed; FEG hierarchy derived). Creates the `users` unique index. `--passwords-only` is the **safe** mode: it re-hashes each sheet password onto the matching existing user and touches nothing else — no deletes, no inserts, no other fields. `--dry-run` reports without writing. | Initial setup or a deliberate reset. Use `--passwords-only` to recover a forgotten password on a populated DB. | The default (full) mode **never** against live production with real accounts. |
+| `scripts/seed_users.py` | Makes `users` match the workbook. Reads the **per-role sheets**. Upserts every row **by username**, so existing accounts keep their `_id`, then removes accounts absent from the sheet. `--passwords-only` re-hashes passwords onto existing users and touches nothing else; `--dry-run` reports. *Until 2026-09-26 the full mode deleted every user and re-inserted them, giving everyone a new `_id` and orphaning every tracker - see [section 15.9](#159-incident-reseed-orphaned-every-tracker).* | Initial setup; syncing the user list with the sheet; password recovery with `--passwords-only`. | Against production without a `--dry-run` first. |
+| `scripts/relink_orphans.py` | Re-attaches trackers whose `fe.id` / `noc_assignee` point at user ids that no longer exist. FE by the username stored on the tracker; NOC by the name the tracker itself recorded (`noc_name`, `noc_history`, chat sender). Ambiguous ids are reported, never guessed. `--apply` writes a backup to `backups/` first; `--restore <file>` undoes it. | Once, after a reseed made with the old `seed_users.py`. Safe to re-run: reports "nothing to do". | - |
+| `scripts/migrate_media.py` | Moves inline base64 media out of tracker and chat documents into GridFS. `--gc` lists GridFS files no document references (e.g. after deleting trackers); `--gc --apply` deletes them, never touching files younger than an hour. | Once per database for the migration; `--gc` whenever trackers or messages are deleted. | - |
 | `scripts/seed_trackers.py` | Generates sample tracker data for demo/testing. | Local demos / load testing. | Never in production. |
 | `init_db.py` (root) | **Legacy.** Creates the wrong `noc_users` collection and seeds `predefined_reasons`; does not set up `users`. | Only for the `predefined_reasons` seed, if you extract that. | Don't rely on it for indexes/users — use the scripts above. |
 | `exec_prod/ServerAdminPankaj_V3.ps1` | Windows ops console (start/stop app, Mongo, reverse proxy; NSSM services). | On the server, as Administrator. See [§9](#9-windows-server-production-setup--caveats). | Not for dev machines. Avoid its "Waitress Service" option (breaks WebSockets). |
@@ -687,6 +691,8 @@ Re-measured 2026-09-26 after the work below, same dataset (207 trackers, 526 cha
 | `GET .../chat/messages` (heaviest thread) | 2,237,521 B | 3,656 B | **-99.8%** |
 | `GET .../chat/messages?since=` | - | 87 B | new |
 | `trackers` collection on disk | 3.9 MB | 1.0 MB | **-74%** |
+| NSG dashboard load (data requests) | 4,205,999 B | 51,544 B | **-99%**, and constant as trackers grow |
+| FSG dashboard load (data requests) | 4,205,999 B | 10,479 B | **-99.8%** |
 
 | Item | State |
 |---|---|
@@ -709,22 +715,15 @@ Re-measured 2026-09-26 after the work below, same dataset (207 trackers, 526 cha
 | `tracker_id` atomic counter + seeding | Done - 8 parallel creates gave 8 distinct ids |
 | `sdwan_id` `DuplicateKeyError` -> 409 | Done |
 | Configurable async mode + `message_queue` + Mongo pool | Done (config only - not load-tested) |
-| **Dashboards paginating the list** | **Pending - see below** |
+| Dashboards fetch one page per tab (`?filter=`) + counts | Done - 1,374-check equivalence harness, 0 mismatches; real-browser regression, 0 failures |
+| Dashboard search on the server (`/api/trackers/search`) | Done - literal substring, never a regex |
+| Stored XSS on dashboards | Fixed - see section 8 |
+| Script-capable media served inline | Fixed - see section 8 |
+| Orphaned tracker ownership | Repaired - see 15.9 |
 | **Analytics as aggregation pipelines** | **Pending - see below** |
 | **Production deployment on gevent + Redis** | **Pending - needs infrastructure** |
 
 ### 15.8 What is deliberately still open
-
-**Dashboards still request `?limit=0`.** The API paginates, but `fe_dashboard.html` and
-`noc_dashboard.html` keep the whole list in memory: KPI tiles, hierarchy drill-downs, search and the
-date-range filters all read from `allInstallations` / `allTrackers` (~25 call sites each). Paginating
-them means moving filtering, search and the KPI maths to the server and adding load-more - a UI change
-with real regression risk, not a mechanical edit. It was not attempted blind. The projection already
-removed 85% of those bytes, so the remaining pressure is row count, not payload weight.
-
-*To finish it:* add `filter`, `search` and date-range parameters to `tracker_page()` mirroring the
-client's six buckets, have the dashboards request one page at a time, and take the tile numbers from
-`/api/trackers/counts` (already built) rather than recomputing from the list.
 
 **Analytics still iterate in Python.** Measured 7-80 ms at 207 trackers, so this is not urgent, but
 `list(find(...))` scales linearly with tracker count. The `events[]` projection removes the worst of it.
@@ -739,3 +738,46 @@ That needs a staging environment and a load test before it can be called done.
 
 **Security has not been touched.** See [section 8](#8-security--gaps--missing-controls). Performance work
 does not make the app production-ready on its own.
+
+### 15.9 Incident: reseed orphaned every tracker
+
+Found 2026-09-26 while testing the dashboards. **205 of 207 trackers referenced FE user ids, and 200
+referenced NOC user ids, that no longer existed.** `seed_users.py` full mode used to `delete_many({})`
+and re-insert every user, which gives every account a fresh `_id`; trackers store owners by id
+(`fe.id`, `noc_assignee`), so one reseed detached all of them. Observed effects, verified through the
+real API before the repair:
+
+- An FE opening their own tracker got `can_interact: false` - every action button disabled.
+- "My" dashboard tabs were empty for everyone.
+- NOC operators were refused chat (`403 Not assigned to you`) on trackers assigned to them.
+
+**Root cause fixed:** full mode now upserts by username. Proven on a copy: a reseed now leaves all 270
+user ids byte-identical, while the old delete-and-insert re-orphaned all 207 trackers.
+
+**Data repaired** with `scripts/relink_orphans.py --apply`: 205 trackers re-linked to their FE, 163 to
+their NOC operator. Afterwards the same FE got `can_interact: true` and every NOC operator got their
+queue back with chat returning 200. Backup: `backups/relink_20260926_221404.json` (undo with
+`--restore`).
+
+**Needs a decision:** 37 trackers were assigned to **Yogesh**, who is in neither the workbook nor
+`users`. **13 are still open.** They were left untouched on purpose - reassign the open ones from the
+NOC Support Group dashboard; the completed ones can stay as history.
+
+### 15.10 How the dashboard change was verified
+
+Moving tab membership from the browser to Mongo changes *where* the rules run, so it was proven
+equivalent rather than eyeballed:
+
+- **Equivalence harness.** The original client predicates - checked verbatim against commit `71ef2e3` -
+  run in Node over the full visible list, compared with the server's `?filter=` results for 6 roles x
+  12 date ranges (the dashboards' own `getDateRange()` in `Asia/Kolkata`, plus boundary-second edges
+  pinned to real timestamps) x every tab: ids and order, badge counts, list totals, average completion
+  time, and page-by-page reassembly. **1,374 checks, 0 mismatches.** A planted one-word bug produced 52
+  mismatches isolated to the NOC roles, so the harness does catch regressions.
+- **Real browser.** Headless Chrome per role: badges on load, every tab's title/count/rows, page 2 through
+  the pager, a range change, rapid tab switching (responses can arrive out of order; a sequence guard
+  keeps the last click), search, zero console errors, desktop and phone screenshots.
+- Both ran against a throwaway copy of the database with ownership re-linked, so the "My" tabs had real
+  data to compare.
+
+If a tab rule changes, change it in `bucket_query()` only - the list, counts and search all read it.

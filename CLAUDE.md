@@ -153,7 +153,7 @@ run.bat          # Windows shortcut
 
 # Set up a fresh database (NOT init_db.py — that is legacy)
 python scripts/create_indexes.py   # canonical indexes (idempotent)
-python scripts/seed_users.py       # seed users (DESTRUCTIVE — see guide §12)
+python scripts/seed_users.py --dry-run   # sync users with the workbook (upserts by username - guide §12)
 
 # Rebuild Tailwind CSS (only if templates changed)
 npm install
@@ -189,6 +189,7 @@ CORS_ORIGINS=*
 python scripts/create_indexes.py                    # canonical indexes (idempotent)
 python scripts/migrate_media.py --dry-run           # inline base64 media -> GridFS
 python scripts/migrate_media.py
+python scripts/relink_orphans.py                    # report trackers orphaned by an old reseed
 ```
 
 > **Performance work:** read [`PROJECT_GUIDE.md` §15](PROJECT_GUIDE.md) first — it holds the measured

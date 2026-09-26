@@ -381,19 +381,19 @@
      ═══════════════════════════════════════════════════════════════════════════ -->
 <div id="camera-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center">
     <div class="w-full h-full flex flex-col">
-        <div class="flex justify-between items-center p-4 text-white">
+        <div class="flex justify-between items-center p-4 text-white flex-shrink-0 safe-top">
             <h3 class="text-lg font-semibold" id="camera-modal-title">Capture Image</h3>
             <button onclick="closeCamera()" class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
                 <span class="material-symbols-outlined icon-sm">close</span>
             </button>
         </div>
-        <div class="flex-1 flex items-center justify-center relative">
-            <video id="camera-video" autoplay playsinline class="max-w-full max-h-full"></video>
+        <div class="flex-1 flex items-center justify-center relative overflow-hidden" style="min-height:0">
+            <video id="camera-video" autoplay playsinline class="max-w-full max-h-full object-contain"></video>
             <canvas id="camera-canvas" class="hidden"></canvas>
             <!-- GPS overlay on camera view -->
             <div id="camera-gps-overlay" class="absolute bottom-2 left-2 right-2 bg-black bg-opacity-50 text-white text-xs px-2 py-1 rounded font-mono leading-snug"></div>
         </div>
-        <div class="p-4">
+        <div class="p-4 flex-shrink-0 safe-bottom">
             <button onclick="takePicture()"
                 class="w-full py-4 bg-white text-gray-900 font-bold rounded-xl shadow-lg flex items-center justify-center gap-2">
                 <span class="material-symbols-outlined icon-sm">photo_camera</span>Capture
@@ -556,7 +556,7 @@ function openCamera(title) {
     document.getElementById('camera-modal-title').textContent = title;
     document.getElementById('camera-modal').classList.remove('hidden');
     updateCameraGPSOverlay();
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
         .then(stream => {
             currentStream = stream;
             document.getElementById('camera-video').srcObject = stream;
@@ -596,7 +596,7 @@ function takePicture() {
     ctx.drawImage(video, 0, 0);
     drawWatermark(canvas, ctx);
 
-    const imageData = canvas.toDataURL('image/jpeg', 0.85);
+    const imageData = canvas.toDataURL('image/jpeg', 0.95);
     const gpsSnap = gpsPosition
         ? { lat: gpsPosition.latitude, lng: gpsPosition.longitude, address: gpsAddress || null }
         : null;

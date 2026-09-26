@@ -580,37 +580,9 @@
     </div>
 </main>
 
-<!-- ── Image Viewer Modal ──────────────────────────────────────────────────── -->
-<div id="tracker-image-viewer-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50">
-    <div style="width:100%;height:100%;display:flex;flex-direction:column">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;color:white">
-            <h3 id="tracker-viewer-title" style="font-size:14px;font-weight:600">Image</h3>
-            <div style="display:flex;gap:8px">
-                <button onclick="document.getElementById('tracker-download-image-btn').click()"
-                    class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30">
-                    <span class="material-symbols-outlined icon-sm">download</span>
-                </button>
-                <button onclick="closeTrackerImageModal()"
-                    class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30">
-                    <span class="material-symbols-outlined icon-sm">close</span>
-                </button>
-            </div>
-        </div>
-        <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:16px;min-height:0">
-            <img id="tracker-viewer-image" style="max-width:100%;max-height:100%;object-fit:contain" alt="Captured image">
-        </div>
-        <div style="padding:12px;display:flex;justify-content:center">
-            <button id="tracker-download-image-btn"
-                class="px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg hover:bg-teal-700 transition-all">
-                <span class="material-symbols-outlined icon-sm mr-2">download</span>Download
-            </button>
-        </div>
-    </div>
-</div>
-
 <!-- ── Request Transfer Modal ──────────────────────────────────────────────── -->
 <div id="request-transfer-modal" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-md" style="width: 50%;">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md" style="max-height:90vh;overflow-y:auto">
         <div class="p-4 bg-gradient-to-r from-orange-600 to-red-600 text-white rounded-t-2xl">
             <div class="flex items-center justify-between">
                 <h3 class="text-base font-bold flex items-center gap-2">
@@ -730,7 +702,7 @@ function renderSiteVerification() {
     const photosEl = document.getElementById('sv-photos');
     const typeLabels = { booster: 'Booster', router: 'Router', other: 'Other' };
     photosEl.innerHTML = (sv.images || []).map((img, idx) => `
-        <div class="relative rounded-xl overflow-hidden bg-gray-100 cursor-pointer" style="aspect-ratio:4/3;" onclick="openSVPhoto('${img.data || ''}')">
+        <div class="relative rounded-xl overflow-hidden bg-gray-100 cursor-pointer" style="aspect-ratio:4/3;" onclick="openSVPhoto(${idx})">
             <img src="${img.data || ''}" class="w-full h-full object-cover">
             <div class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-60 text-white text-center py-1" style="font-size:10px;">
                 ${typeLabels[img.type] || `Photo ${idx+1}`}
@@ -814,10 +786,12 @@ async function rejectSiteVerification(reason) {
     } catch { showToast('Network error', 'error'); }
 }
 
-function openSVPhoto(src) {
-    if (!src) return;
-    document.getElementById('sv-photo-lightbox-img').src = src;
-    document.getElementById('sv-photo-lightbox').classList.remove('hidden');
+function openSVPhoto(idx) {
+    const img = (trackerData?.site_verification?.images || [])[idx];
+    if (!img?.data) { showToast('No image available', 'error'); return; }
+    const label = { booster: 'Booster', router: 'Router', other: 'Other' }[img.type] || `Photo ${idx + 1}`;
+    openImageViewer(img.data, `Site Verification — ${label}`,
+        `${trackerData.sdwan_id}_site_${label.replace(/\s+/g,'_')}`);
 }
 
 function renderHeader() {
@@ -1520,20 +1494,9 @@ function viewFirmwareImages() {
     else showToast('No image available', 'error');
 }
 
+// Delegates to the shared zoom/pan/download viewer defined in base.html.
 function showImageModal(data, title) {
-    document.getElementById('tracker-viewer-image').src = data;
-    document.getElementById('tracker-viewer-title').textContent = title;
-    document.getElementById('tracker-download-image-btn').onclick = () => {
-        const a = document.createElement('a');
-        a.href = data;
-        a.download = `${title.replace(/\s+/g,'_')}_${Date.now()}.jpg`;
-        a.click();
-    };
-    document.getElementById('tracker-image-viewer-modal').classList.remove('hidden');
-}
-
-function closeTrackerImageModal() {
-    document.getElementById('tracker-image-viewer-modal').classList.add('hidden');
+    openImageViewer(data, title, `${title.replace(/\s+/g,'_')}_${Date.now()}`);
 }
 
 async function refreshTracker() {
@@ -1683,14 +1646,5 @@ loadTracker();
 setInterval(loadTracker, 15000);   // Refresh data every 15s
 setInterval(updateTimers, 1000);   // Tick timers every 1s
 </script>
-
-<!-- Site Verification Photo Lightbox -->
-<div id="sv-photo-lightbox" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50 flex items-center justify-center p-4" onclick="this.classList.add('hidden')">
-    <img id="sv-photo-lightbox-img" class="max-w-full max-h-full rounded-xl shadow-2xl" src="">
-    <button onclick="document.getElementById('sv-photo-lightbox').classList.add('hidden')"
-        class="absolute top-4 right-4 h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center text-white hover:bg-opacity-30">
-        <span class="material-symbols-outlined">close</span>
-    </button>
-</div>
 
 {% endblock %}

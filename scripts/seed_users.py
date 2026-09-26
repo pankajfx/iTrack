@@ -4,25 +4,46 @@ seed_users.py
 Reads user data from the Excel file (co-located with this script):
     scripts/SDWAN Installation Tracker Master User Data.xlsx
 
-Clears the users collection and re-populates it with all users.
-Passwords are hashed with Werkzeug. FEG hierarchy (field_support) is
-derived from region → FS username mapping.
+Source of truth is the per-role sheets - FE(235), FEG(23), FS(5), FSG(1),
+NS(5), NSG(1) - NOT the consolidated All(270) sheet, whose Password column
+holds a single placeholder value for every user.
+
+Two modes:
+
+  full (default)      DESTRUCTIVE — clears the users collection and re-populates
+                      it from the workbook. Passwords are hashed with Werkzeug and
+                      FEG hierarchy (field_support) is derived from region → FS.
+
+  --passwords-only    Non-destructive. Re-hashes each workbook password onto the
+                      matching existing user (matched by username) and touches
+                      nothing else — no deletes, no inserts, no other fields.
+                      Use this to recover from a forgotten/!changed password
+                      without losing accounts or hierarchy edits.
+
+Add --dry-run to either mode to see what would happen without writing.
 
 Usage (run from project root):
     python scripts/seed_users.py
+    python scripts/seed_users.py --passwords-only
+    python scripts/seed_users.py --passwords-only --dry-run
 
 Requirements:
     pip install openpyxl werkzeug pymongo
 """
 
+import argparse
 import os
+import re
+import shutil
 import sys
+import tempfile
+import zipfile
 from collections import Counter
 from datetime import datetime
 
 from bson import ObjectId
 from pymongo import MongoClient
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 from dotenv import load_dotenv
 
 try:
@@ -51,19 +72,95 @@ ROLE_MAP = {
 }
 
 # ── Read Excel ────────────────────────────────────────────────────────────────
-def read_excel_rows():
-    """Return list of dicts from the 'All(270)' sheet (header row → keys)."""
-    wb = openpyxl.load_workbook(EXCEL_PATH)
-    # Use the consolidated sheet; fall back to first sheet if name changes
-    sheet_name = 'All(270)' if 'All(270)' in wb.sheetnames else wb.sheetnames[0]
-    ws = wb[sheet_name]
-    headers = [ws.cell(1, c).value for c in range(1, ws.max_column + 1)]
-    rows = []
-    for r in range(2, ws.max_row + 1):
-        row = {headers[i]: ws.cell(r, i + 1).value for i in range(len(headers))}
+# Excel writes autofilter values that openpyxl's validator rejects (this workbook
+# has <customFilter val=" ">), which makes load_workbook() raise before a single row
+# is read. The filters are irrelevant to us, so strip them from a throwaway copy.
+_AUTOFILTER_RE = re.compile(
+    rb'<autoFilter\b[^>]*/>|<autoFilter\b[^>]*>.*?</autoFilter>', re.S)
+
+
+def _workbook_without_filters(path):
+    """Copy the .xlsx to a temp file with every <autoFilter> removed."""
+    tmp_dir = tempfile.mkdtemp(prefix='seed_users_')
+    tmp = os.path.join(tmp_dir, os.path.basename(path))
+    with zipfile.ZipFile(path) as zin, zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename.startswith('xl/worksheets/') and item.filename.endswith('.xml'):
+                data = _AUTOFILTER_RE.sub(b'', data)
+            zout.writestr(item, data)
+    return tmp_dir, tmp
+
+
+# The consolidated "All(270)" sheet carries PLACEHOLDER passwords - a single value
+# repeated for every user. The per-role sheets (FE(235), FEG(23), FS(5), FSG(1),
+# NS(5), NSG(1)) hold the real per-user passwords and agree with the consolidated
+# sheet on every other column, so they are the source of truth. Seeding from
+# All(270) is what put "test123" on all 270 accounts and broke every real login.
+ROLE_SHEET_RE = re.compile('^(FE|FEG|FS|FSG|NS|NSG)[(][0-9]+[)]$')
+
+
+def _sheet_rows(ws):
+    """Rows of one sheet as dicts keyed by its header row; blank rows dropped."""
+    rows_iter = ws.iter_rows(values_only=True)
+    try:
+        headers = list(next(rows_iter))
+    except StopIteration:
+        return []
+    out = []
+    for values in rows_iter:
+        row = dict(zip(headers, values))
         if row.get('Role'):          # skip blank trailing rows
-            rows.append(row)
+            out.append(row)
+    return out
+
+
+def _warn_if_placeholder_passwords(rows):
+    """Flag a sheet whose rows all share one password - the All(270) failure mode."""
+    passwords = {pw for pw in (row_credentials(r)[1] for r in rows) if pw}
+    if len(rows) > 10 and len(passwords) == 1:
+        print("")
+        print("  *** WARNING: all %d rows share one password." % len(rows))
+        print("      That is a placeholder sheet, not real credentials.")
+        print("      Seeding this would lock every user out of their real password.")
+
+
+def read_excel_rows():
+    """Return user rows, preferring the per-role sheets over the consolidated one."""
+    tmp_dir, tmp_path = _workbook_without_filters(EXCEL_PATH)
+    try:
+        wb = openpyxl.load_workbook(tmp_path, read_only=True, data_only=True)
+        role_sheets = [n for n in wb.sheetnames if ROLE_SHEET_RE.match(n)]
+        if role_sheets:
+            rows, seen = [], {}
+            for name in role_sheets:
+                for row in _sheet_rows(wb[name]):
+                    username = str(row.get('Username', '')).strip()
+                    if username in seen:
+                        print("  WARNING: duplicate username %r in %s (kept %s)"
+                              % (username, name, seen[username]))
+                        continue
+                    seen[username] = name
+                    rows.append(row)
+            print("  Source sheets: %s" % ', '.join(role_sheets))
+        else:
+            name = 'All(270)' if 'All(270)' in wb.sheetnames else wb.sheetnames[0]
+            rows = _sheet_rows(wb[name])
+            print("  Source sheet: %s (no per-role sheets found)" % name)
+        wb.close()
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    _warn_if_placeholder_passwords(rows)
     return rows
+
+
+def row_credentials(row):
+    """(username, plaintext password) for a sheet row — password defaults to username."""
+    username = str(row.get('Username', '')).strip()
+    raw = row.get('Password')
+    password = str(raw).strip() if raw is not None else username
+    return username, password
 
 
 # ── Build MongoDB documents ───────────────────────────────────────────────────
@@ -88,9 +185,8 @@ def build_user_docs(rows):
             skipped.append(f"Unknown role '{excel_role}' — username: {row.get('Username')}")
             continue
 
-        username       = str(row.get('Username', '')).strip()
+        username, password_plain = row_credentials(row)
         name           = str(row.get('Name', username)).strip()
-        password_plain = str(row.get('Password', username)).strip()
         zone           = str(row['Zone']).strip() if row.get('Zone') else 'India'
         region         = str(row['Region']).strip() if row.get('Region') else None
         group          = str(row['Group']).strip() if row.get('Group') else None   # FE → FEG name
@@ -141,8 +237,68 @@ def build_user_docs(rows):
     return docs
 
 
+# ── Password-only reset (non-destructive) ─────────────────────────────────────
+def reset_passwords(db, rows, dry_run=False):
+    """Re-hash each workbook password onto the matching existing user.
+
+    Only the `password` field (and `updated_at`) is touched — accounts, roles and
+    hierarchy stay exactly as they are. Users absent from the workbook are left
+    alone; workbook rows with no matching username are reported, not created.
+    """
+    now = datetime.utcnow()
+    updated = unchanged = not_found = 0
+    missing = []
+
+    for row in rows:
+        username, password_plain = row_credentials(row)
+        if not username:
+            continue
+
+        user = db.users.find_one({'username': username}, {'_id': 1, 'password': 1})
+        if not user:
+            not_found += 1
+            missing.append(username)
+            continue
+
+        # Skip the write when the stored hash already accepts this password —
+        # scrypt hashes are salted, so comparing hashes directly would never match.
+        if user.get('password') and check_password_hash(user['password'], password_plain):
+            unchanged += 1
+            continue
+
+        if not dry_run:
+            db.users.update_one(
+                {'_id': user['_id']},
+                {'$set': {'password': generate_password_hash(password_plain),
+                          'updated_at': now}}
+            )
+        updated += 1
+
+    verb = "would be reset" if dry_run else "reset"
+    print("")
+    print(f"  Passwords {verb}      : {updated}")
+    print(f"  Already correct        : {unchanged}")
+    print(f"  In sheet, not in DB    : {not_found}")
+    if missing:
+        preview = ', '.join(missing[:10])
+        print(f"    {preview}{' …' if len(missing) > 10 else ''}")
+
+    total = db.users.count_documents({})
+    print(f"  Users in DB (untouched count): {total}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
+    parser = argparse.ArgumentParser(
+        description='Seed users from the master workbook. See the module docstring '
+                    'for full details.')
+    parser.add_argument('--passwords-only', action='store_true',
+                        help="Only re-hash passwords onto existing users. "
+                             "No deletes, no inserts, no other fields changed.")
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Report what would change without writing anything.')
+    args = parser.parse_args()
+
     print(f"Excel source: {EXCEL_PATH}")
     if not os.path.exists(EXCEL_PATH):
         print("ERROR: Excel file not found.")
@@ -151,11 +307,26 @@ def main():
     rows = read_excel_rows()
     print(f"  Read {len(rows)} rows from Excel")
 
+    client = MongoClient(MONGO_URI)
+    db     = client.get_default_database()
+
+    if args.passwords_only:
+        print("")
+        print(f"Mode: PASSWORDS ONLY{' (dry run)' if args.dry_run else ''} - "
+              f"no user will be deleted or created.")
+        reset_passwords(db, rows, dry_run=args.dry_run)
+        client.close()
+        return
+
     docs = build_user_docs(rows)
     print(f"  Built {len(docs)} user documents")
 
-    client = MongoClient(MONGO_URI)
-    db     = client.get_default_database()
+    if args.dry_run:
+        print("")
+        print(f"DRY RUN - would delete {db.users.count_documents({})} user(s) "
+              f"and insert {len(docs)}.")
+        client.close()
+        return
 
     # Ensure collection + unique index on username
     if 'users' not in db.list_collection_names():

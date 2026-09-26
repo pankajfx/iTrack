@@ -425,34 +425,6 @@
     </div>
 </main>
 
-<!-- Image Viewer Modal -->
-<div id="tracker-image-viewer-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 z-50">
-    <div style="width:100%;height:100%;display:flex;flex-direction:column">
-        <div style="display:flex;justify-content:space-between;align-items:center;padding:12px;color:white">
-            <h3 id="tracker-viewer-title" style="font-size:14px;font-weight:600">Image</h3>
-            <div style="display:flex;gap:8px">
-                <button onclick="document.getElementById('tracker-download-image-btn').click()"
-                    class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30">
-                    <span class="material-symbols-outlined icon-sm">download</span>
-                </button>
-                <button onclick="closeTrackerImageModal()"
-                    class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center hover:bg-opacity-30">
-                    <span class="material-symbols-outlined icon-sm">close</span>
-                </button>
-            </div>
-        </div>
-        <div style="flex:1;display:flex;align-items:center;justify-content:center;padding:16px;min-height:0">
-            <img id="tracker-viewer-image" style="max-width:100%;max-height:100%;object-fit:contain" alt="Captured image">
-        </div>
-        <div style="padding:12px;display:flex;justify-content:center">
-            <button id="tracker-download-image-btn"
-                class="px-6 py-3 bg-teal-600 text-white font-semibold rounded-lg hover:bg-teal-700 transition-all">
-                <span class="material-symbols-outlined icon-sm mr-2">download</span>Download
-            </button>
-        </div>
-    </div>
-</div>
-
 <script>
 let trackerData = null;
 
@@ -957,20 +929,9 @@ function viewFirmwareImages() {
     else showToast('No image available', 'error');
 }
 
+// Delegates to the shared zoom/pan/download viewer defined in base.html.
 function showImageModal(data, title) {
-    document.getElementById('tracker-viewer-image').src = data;
-    document.getElementById('tracker-viewer-title').textContent = title;
-    document.getElementById('tracker-download-image-btn').onclick = () => {
-        const a = document.createElement('a');
-        a.href = data;
-        a.download = `${title.replace(/\s+/g,'_')}_${Date.now()}.jpg`;
-        a.click();
-    };
-    document.getElementById('tracker-image-viewer-modal').classList.remove('hidden');
-}
-
-function closeTrackerImageModal() {
-    document.getElementById('tracker-image-viewer-modal').classList.add('hidden');
+    openImageViewer(data, title, `${title.replace(/\s+/g,'_')}_${Date.now()}`);
 }
 
 async function refreshTracker() {
@@ -1121,7 +1082,7 @@ function svOpenCamera(slot) {
     const labels = { 1: 'Booster', 2: 'SDWAN Router', 3: 'Site Photo' };
     document.getElementById('sv-camera-title').textContent = `Capture ${labels[slot]} Photo`;
     document.getElementById('sv-camera-modal').classList.remove('hidden');
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
         .then(s => { svStream = s; document.getElementById('sv-camera-video').srcObject = s; })
         .catch(() => { showToast('Camera access denied', 'error'); svCloseCamera(); });
 }
@@ -1153,7 +1114,7 @@ function svTakePicture() {
     ctx.fillStyle = svGpsPosition ? '#00FF88' : '#FF6666';
     lines.forEach((line, i) => ctx.fillText(line, 2 + pad, by + pad + (i + 1) * lh - Math.floor(lh * 0.2)));
 
-    const imageData = canvas.toDataURL('image/jpeg', 0.85);
+    const imageData = canvas.toDataURL('image/jpeg', 0.95);
     const gpsSnap = svGpsPosition ? { lat: svGpsPosition.latitude, lng: svGpsPosition.longitude, address: svGpsAddress || null } : null;
     svPhotos[svCurrentSlot] = { type: svTypes[svCurrentSlot], data: imageData, gps: gpsSnap, captured_at: new Date().toISOString() };
     svCloseCamera();
@@ -1247,16 +1208,16 @@ setInterval(loadTracker, 30000);  // Auto-refresh every 30s for FE (less aggress
 
 <!-- Site Verification Camera Modal -->
 <div id="sv-camera-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 flex flex-col" style="z-index: 60;">
-    <div class="flex justify-between items-center p-4 text-white">
+    <div class="flex justify-between items-center p-4 text-white flex-shrink-0 safe-top">
         <h3 class="text-base font-semibold" id="sv-camera-title">Capture Photo</h3>
         <button onclick="svCloseCamera()" class="h-10 w-10 bg-white bg-opacity-20 rounded-xl flex items-center justify-center">
             <span class="material-symbols-outlined">close</span>
         </button>
     </div>
-    <div class="flex-1 flex items-center justify-center">
-        <video id="sv-camera-video" autoplay playsinline class="max-w-full max-h-full"></video>
+    <div class="flex-1 flex items-center justify-center overflow-hidden" style="min-height:0">
+        <video id="sv-camera-video" autoplay playsinline class="max-w-full max-h-full object-contain"></video>
     </div>
-    <div class="p-4">
+    <div class="p-4 flex-shrink-0 safe-bottom">
         <button onclick="svTakePicture()" class="w-full py-4 bg-white text-gray-900 font-bold rounded-xl flex items-center justify-center gap-2">
             <span class="material-symbols-outlined">photo_camera</span>Capture
         </button>

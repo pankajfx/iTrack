@@ -2357,6 +2357,10 @@ def api_send_chat_message(tracker_id):
     message_text = data.get('message', '').strip()
     message_type = data.get('type', 'text')
     file_url     = data.get('file_url')
+    try:
+        duration = float(data.get('duration')) if data.get('duration') is not None else None
+    except (TypeError, ValueError):
+        duration = None
 
     if not message_text and not file_url:
         return jsonify({'error': 'Message or file required'}), 400
@@ -2371,6 +2375,7 @@ def api_send_chat_message(tracker_id):
         'message': message_text,
         'type': message_type,
         'file_url': file_url,
+        'duration': duration,      # seconds, audio only — see api_send_chat_message
         'timestamp': now,
         'read': False
     }
@@ -2427,12 +2432,15 @@ def api_upload_chat_file(tracker_id):
                     img = img.convert('RGBA')
                 bg.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
                 img = bg
-            max_size = 1024
+            # Keep enough detail that a downloaded chat photo is still readable
+            # (serial numbers, LED labels, GPS stamps). Only oversize phone shots
+            # get scaled, and the JPEG re-encode stays visually lossless.
+            max_size = 1920
             if max(img.size) > max_size:
                 ratio = max_size / max(img.size)
                 img = img.resize(tuple(int(d * ratio) for d in img.size), Image.Resampling.LANCZOS)
             out = BytesIO()
-            img.save(out, format='JPEG', quality=85, optimize=True)
+            img.save(out, format='JPEG', quality=95, optimize=True)
             file_data = out.getvalue()
             mime_type = 'image/jpeg'
         except ImportError:

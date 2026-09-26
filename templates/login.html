@@ -251,6 +251,12 @@
                     <input type="hidden" id="select-dropdown" value="">
                 </div>
 
+                <!-- Identifies the chosen account to the browser's password manager
+                     so a saved password is scoped per user instead of per origin. -->
+                <input type="text" id="account-username" name="username" autocomplete="username"
+                       readonly tabindex="-1" aria-hidden="true" value=""
+                       style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;border:0;clip:rect(0 0 0 0);overflow:hidden;">
+
                 <!-- Password -->
                 <div id="password-container" class="hidden">
                     <label for="password" class="block text-xs font-bold text-white mb-1 ml-0.5 tracking-wide">
@@ -681,6 +687,12 @@
     });
     
     // Select dropdown handler
+    // Mirrors the selected account into the hidden username field (see markup).
+    function setAccountUsername(value) {
+        const el = document.getElementById('account-username');
+        if (el) el.value = value || '';
+    }
+
     selectDropdown.addEventListener('change', (e) => {
         const value = e.target.value;
         if (!value) return;
@@ -690,20 +702,30 @@
         if (currentRole === 'FIELD_ENGINEER') {
             selectedData.fe_name = data.fe_name;
             selectedData.fe_group = data.fe_group;
+            setAccountUsername(`${data.fe_name}_${data.fe_group}`);
         } else if (currentRole === 'FRANCHISE') {
             selectedData.feg_name = data.feg_name;
             selectedData.actual_role = data.role;
+            setAccountUsername(data.feg_name);
         } else if (currentRole === 'NELCO_SUPPORT') {
             if (data.role === 'FIELD_SUPPORT') {
                 selectedData.fs_name = data.fs_name;
+                setAccountUsername(data.fs_name);
             } else {
                 selectedData.fsg_name = data.fsg_name;
+                setAccountUsername(data.fsg_name);
             }
             selectedData.actual_role = data.role;
         } else if (currentRole === 'NOC_SUPPORT') {
             selectedData.noc_username = data.noc_username;
             selectedData.actual_role = data.role;
+            setAccountUsername(data.noc_username);
         }
+        
+        // A stale autofilled password belongs to whoever was selected before.
+        passwordInput.value = '';
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-50', 'cursor-not-allowed');
         
         passwordContainer.classList.remove('hidden');
         passwordInput.focus();

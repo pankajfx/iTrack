@@ -176,6 +176,19 @@ IMAGE_MAX_DIM=1920                 # server-side resize, longest edge; 0 = never
 IMAGE_QUALITY=95                   # server-side JPEG quality
 CAPTURE_MAX_DIM=1920               # camera width requested in the browser
 CAPTURE_QUALITY=0.95               # canvas JPEG quality in the browser
+
+SOCKETIO_ASYNC_MODE=threading      # threading (dev) | gevent | eventlet
+SOCKETIO_MESSAGE_QUEUE=            # redis://... REQUIRED before running >1 worker
+MONGO_MAX_POOL_SIZE=100            # must cover per-worker concurrency
+STATIC_VERSION=                    # cache-bust token for /static (defaults to output.css mtime)
+CORS_ORIGINS=*
+```
+
+```bash
+# One-time database setup, in this order
+python scripts/create_indexes.py                    # canonical indexes (idempotent)
+python scripts/migrate_media.py --dry-run           # inline base64 media -> GridFS
+python scripts/migrate_media.py
 ```
 
 > **Performance work:** read [`PROJECT_GUIDE.md` §15](PROJECT_GUIDE.md) first — it holds the measured

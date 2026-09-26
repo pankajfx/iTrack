@@ -676,18 +676,66 @@ lost-update race. Prefer targeted `$set`/`$push`.
 
 ### 15.7 Current status
 
+Re-measured 2026-09-26 after the work below, same dataset (207 trackers, 526 chat messages).
+
+| Endpoint | Before | After | Change |
+|---|---|---|---|
+| `GET /api/trackers/all-noc` (everything) | 4,205,999 B | 632,113 B | **-85%** |
+| `GET /api/trackers/all-noc` (default page) | - | 139,739 B | new |
+| `GET /api/trackers/counts` | (client-side, after full download) | 304 B / 7 ms | new |
+| `GET /api/trackers/<id>` (image-heavy) | ~1.2 MB | 9,635 B | **-99%** |
+| `GET .../chat/messages` (heaviest thread) | 2,237,521 B | 3,656 B | **-99.8%** |
+| `GET .../chat/messages?since=` | - | 87 B | new |
+| `trackers` collection on disk | 3.9 MB | 1.0 MB | **-74%** |
+
 | Item | State |
 |---|---|
-| Indexes applied and verified | Done 2026-09-26 |
+| Indexes applied and verified | Done |
 | `create_indexes.py` console crash | Fixed |
 | `seed_users.py` index-name collision | Fixed |
-| Configurable media policy (`MEDIA_PROFILE` et al.) | Done 2026-09-26 |
+| Configurable media policy (`MEDIA_PROFILE`) | Done |
 | Downloads preserve stored bytes exactly | Done |
-| List-endpoint projections | **Pending — item 2** |
-| Server-side counts + pagination | **Pending — item 3** |
-| Media out of documents (GridFS) | **Pending — item 4, unblocks `original` profile** |
-| Incremental chat fetch | **Pending — item 5** |
-| Remove polling in favour of sockets | **Pending — item 6** |
-| Static asset caching | **Pending — item 7** |
-| Production server + `message_queue` | **Pending — item 9** |
-| `tracker_id` race | **Pending — §15.6** |
+| List-endpoint projections (`TRACKER_LIST_PROJECTION`) | Done |
+| Server-side counts (`/api/trackers/counts`, one `$facet`) | Done |
+| Pagination in the API (`?page=`/`?limit=`) | Done |
+| Media in GridFS + `/api/media/<id>`, cached immutable | Done |
+| Media migration (`scripts/migrate_media.py`) | Done - 34 files / 3.8 MB, byte-verified |
+| Incremental chat fetch (`?since=`), media never inlined | Done |
+| Socket.IO chat broadcasts carry URLs, not bytes | Done |
+| Polling reduced to a reconcile safety net (5s/30s -> 60s/120s) | Done |
+| Static asset caching follows `FLASK_DEBUG` | Done |
+| `api_noc_users_stats` N+1 -> one aggregation | Done |
+| Analytics projection (drops `events[]` where unused) | Done - output verified identical on 8 endpoints |
+| `tracker_id` atomic counter + seeding | Done - 8 parallel creates gave 8 distinct ids |
+| `sdwan_id` `DuplicateKeyError` -> 409 | Done |
+| Configurable async mode + `message_queue` + Mongo pool | Done (config only - not load-tested) |
+| **Dashboards paginating the list** | **Pending - see below** |
+| **Analytics as aggregation pipelines** | **Pending - see below** |
+| **Production deployment on gevent + Redis** | **Pending - needs infrastructure** |
+
+### 15.8 What is deliberately still open
+
+**Dashboards still request `?limit=0`.** The API paginates, but `fe_dashboard.html` and
+`noc_dashboard.html` keep the whole list in memory: KPI tiles, hierarchy drill-downs, search and the
+date-range filters all read from `allInstallations` / `allTrackers` (~25 call sites each). Paginating
+them means moving filtering, search and the KPI maths to the server and adding load-more - a UI change
+with real regression risk, not a mechanical edit. It was not attempted blind. The projection already
+removed 85% of those bytes, so the remaining pressure is row count, not payload weight.
+
+*To finish it:* add `filter`, `search` and date-range parameters to `tracker_page()` mirroring the
+client's six buckets, have the dashboards request one page at a time, and take the tile numbers from
+`/api/trackers/counts` (already built) rather than recomputing from the list.
+
+**Analytics still iterate in Python.** Measured 7-80 ms at 207 trackers, so this is not urgent, but
+`list(find(...))` scales linearly with tracker count. The `events[]` projection removes the worst of it.
+Converting the KPI maths to `$group`/`$avg` pipelines changes numbers the business reads, so it wants a
+before/after comparison per endpoint - the harness used here (capture every analytics response, diff after
+the change) is the right way to do it safely.
+
+**The production serving model is configured but unproven.** `SOCKETIO_ASYNC_MODE`,
+`SOCKETIO_MESSAGE_QUEUE` and the Mongo pool settings are wired and the app warns on startup when it is
+running single-process, but nothing here has been run under gevent, behind gunicorn, or against Redis.
+That needs a staging environment and a load test before it can be called done.
+
+**Security has not been touched.** See [section 8](#8-security--gaps--missing-controls). Performance work
+does not make the app production-ready on its own.

@@ -19,7 +19,14 @@ load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production')
-app.config['MONGO_URI'] = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/sdwan_tracker')
+# maxPoolSize must cover the concurrency of every worker process, or requests
+# queue on connection checkout under load. Appended only when the URI does not
+# already carry pool settings, so an explicit MONGO_URI always wins.
+_mongo_uri = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/sdwan_tracker')
+if 'maxPoolSize' not in _mongo_uri:
+    _pool = os.environ.get('MONGO_MAX_POOL_SIZE', '100')
+    _mongo_uri += ('&' if '?' in _mongo_uri else '?') +                   f'maxPoolSize={_pool}&minPoolSize=5&waitQueueTimeoutMS=5000&retryWrites=true'
+app.config['MONGO_URI'] = _mongo_uri
 #prod
 # app.config['MONGO_URI'] = os.environ.get('MONGO_URI', 'mongodb://myAdminUser:MyStrongPassword123@localhost:27017/sdwan_tracker?authSource=admin')
 
@@ -36,7 +43,23 @@ STATIC_VERSION = os.environ.get('STATIC_VERSION') or str(int(os.path.getmtime(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'css', 'output.css'))))
 
 mongo = PyMongo(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+# Serving model. async_mode='threading' + socketio.run() is the Werkzeug dev
+# server: one process, one thread per connection, and no way to add workers -
+# without a message queue a second worker cannot see the first worker's rooms, so
+# broadcasts reach only the clients attached to whichever worker emitted them.
+#
+#   SOCKETIO_ASYNC_MODE    threading (default, dev) | gevent | eventlet
+#   SOCKETIO_MESSAGE_QUEUE redis://host:6379/0 - REQUIRED before running >1 worker
+#
+# Production (see PROJECT_GUIDE section 15.5 item 9):
+#   SOCKETIO_ASYNC_MODE=gevent SOCKETIO_MESSAGE_QUEUE=redis://127.0.0.1:6379/0 #   gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 4 app:app
+SOCKETIO_ASYNC_MODE    = os.environ.get('SOCKETIO_ASYNC_MODE', 'threading')
+SOCKETIO_MESSAGE_QUEUE = os.environ.get('SOCKETIO_MESSAGE_QUEUE') or None
+
+socketio = SocketIO(app,
+                    cors_allowed_origins=os.environ.get('CORS_ORIGINS', '*'),
+                    async_mode=SOCKETIO_ASYNC_MODE,
+                    message_queue=SOCKETIO_MESSAGE_QUEUE)
 
 # ─── Jinja2 template filters ───────────────────────────────────────────────
 @app.template_filter('display_name')
@@ -699,6 +722,13 @@ TRACKER_LIST_PROJECTION = {
     'router.images': 0,
     'events': 0,
 }
+
+# Analytics reads pull whole documents into Python and iterate. Most of them never
+# look at events[], which is the bulk of a document now that media lives in GridFS.
+# Excluding it keeps these endpoints from scaling with timeline length as well as
+# tracker count. Endpoints that DO read events (fe/day, noc/user/day) intentionally
+# omit this projection.
+ANALYTICS_PROJECTION = {'events': 0}
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE     = 200
@@ -2990,8 +3020,8 @@ def api_analytics_kpi():
     custom_to   = request.args.get('to')
     start, end  = get_date_range(range_type, custom_from, custom_to)
 
-    started    = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}))
-    completed  = list(mongo.db.trackers.find({'completed_at': {'$gte': start, '$lte': end}}))
+    started    = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}, ANALYTICS_PROJECTION))
+    completed  = list(mongo.db.trackers.find({'completed_at': {'$gte': start, '$lte': end}}, ANALYTICS_PROJECTION))
     in_progress = mongo.db.trackers.count_documents({'created_at': {'$lte': end}, 'completed_at': None, 'noc_assignee': {'$ne': None}})
     unassigned  = mongo.db.trackers.count_documents({'completed_at': None, 'noc_assignee': None})
 
@@ -3064,7 +3094,7 @@ def api_analytics_fe_overview():
         return jsonify({'error': 'Unauthorized'}), 403
     range_type  = request.args.get('range', 'today')
     start, end  = get_date_range(range_type, request.args.get('from'), request.args.get('to'))
-    trackers    = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}))
+    trackers    = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}, ANALYTICS_PROJECTION))
 
     day_data = {}
     fe_accounts = set()
@@ -3119,7 +3149,7 @@ def api_analytics_noc_overview():
         return jsonify({'error': 'Unauthorized'}), 403
     range_type = request.args.get('range', 'today')
     start, end = get_date_range(range_type, request.args.get('from'), request.args.get('to'))
-    trackers   = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}))
+    trackers   = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}, ANALYTICS_PROJECTION))
 
     day_data = {}
     for t in trackers:
@@ -3149,7 +3179,7 @@ def api_analytics_trend():
         return jsonify({'error': 'Unauthorized'}), 403
     range_type = request.args.get('range', 'today')
     start, end = get_date_range(range_type, request.args.get('from'), request.args.get('to'))
-    trackers   = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}))
+    trackers   = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}, ANALYTICS_PROJECTION))
 
     day_data = {}
     for t in trackers:
@@ -3185,7 +3215,7 @@ def api_analytics_stage_durations():
         return jsonify({'error': 'Unauthorized'}), 403
     range_type = request.args.get('range', 'today')
     start, end = get_date_range(range_type, request.args.get('from'), request.args.get('to'))
-    completed = list(mongo.db.trackers.find({'completed_at': {'$gte': start, '$lte': end}}))
+    completed = list(mongo.db.trackers.find({'completed_at': {'$gte': start, '$lte': end}}, ANALYTICS_PROJECTION))
 
     stage_totals = {
         'Queue Wait': [], 'SIM1 Activation': [], 'SIM2 Activation': [],
@@ -3426,7 +3456,7 @@ def api_analytics_noc_day(date):
     except ValueError:
         return jsonify({'error': 'Invalid date format'}), 400
 
-    trackers = list(mongo.db.trackers.find({'created_at': {'$gte': day_start, '$lt': day_end}}))
+    trackers = list(mongo.db.trackers.find({'created_at': {'$gte': day_start, '$lt': day_end}}, ANALYTICS_PROJECTION))
     noc_data = {}
     for t in trackers:
         noc_id = t.get('noc_assignee')
@@ -3502,7 +3532,7 @@ def api_analytics_export_fe():
 
         range_type = request.args.get('range', 'today')
         start, end = get_date_range(range_type, request.args.get('from'), request.args.get('to'))
-        trackers   = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}).sort('created_at', 1))
+        trackers   = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}, ANALYTICS_PROJECTION).sort('created_at', 1))
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -3577,7 +3607,7 @@ def api_analytics_export_noc():
 
         range_type = request.args.get('range', 'today')
         start, end = get_date_range(range_type, request.args.get('from'), request.args.get('to'))
-        trackers   = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}).sort('created_at', 1))
+        trackers   = list(mongo.db.trackers.find({'created_at': {'$gte': start, '$lte': end}}, ANALYTICS_PROJECTION).sort('created_at', 1))
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -3912,12 +3942,22 @@ def broadcast_to_user(user_id, event_type, data):
     }, room=f"user_{user_id}")
 
 
+# Seed the tracker-id counters as soon as the app object exists, so it happens
+# under gunicorn too - not only when this file is run directly.
+with app.app_context():
+    bootstrap_tracker_counters()
+
+
 if __name__ == '__main__':
-    # eventlet.monkey_patch() at module top gives Flask-SocketIO native WebSocket
-    # support. socketio.run() uses eventlet's WSGI server — no Waitress/Gunicorn needed.
+    # Development entry point only. This is the Werkzeug dev server; see the
+    # SocketIO configuration above for how to run this in production.
+    if SOCKETIO_ASYNC_MODE == 'threading' and not FLASK_DEBUG:
+        print('[warning] async_mode=threading is the development server. '
+              'Set SOCKETIO_ASYNC_MODE=gevent and SOCKETIO_MESSAGE_QUEUE for production.')
+    if SOCKETIO_MESSAGE_QUEUE is None:
+        print('[warning] no SOCKETIO_MESSAGE_QUEUE: safe for a single process only. '
+              'Adding workers without it silently breaks Socket.IO broadcasts.')
     debug = FLASK_DEBUG
     port = int(os.environ.get('PORT', 5001))
-    with app.app_context():
-        bootstrap_tracker_counters()
     socketio.run(app, debug=debug, host='0.0.0.0', port=port)
 

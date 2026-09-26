@@ -256,12 +256,19 @@
         // Add to chatMessages array
         chatMessages.push(message);
         chatRenderedKey = chatSignature(chatMessages);
+        if (!chatNewestTimestamp || message.timestamp > chatNewestTimestamp) {
+            chatNewestTimestamp = message.timestamp;
+        }
     }
 
     async function loadChat() {
         console.log('loadChat() called, trackerId:', trackerId);
         try {
-            const response = await fetch(`/api/trackers/${trackerId}/chat/messages`);
+            // ?since= asks only for what we do not already hold. The first call
+            // omits it and fetches the thread; every later call is a few dozen bytes.
+            const url = `/api/trackers/${trackerId}/chat/messages`
+                      + (chatNewestTimestamp ? `?since=${encodeURIComponent(chatNewestTimestamp)}` : '');
+            const response = await fetch(url);
             const data = await response.json();
             
             console.log('Chat data received:', data);
@@ -285,7 +292,17 @@
                     document.getElementById('chat-status').textContent = 'View Only - Created by different account';
                 }
                 
-                displayMessages(data.messages);
+                if (data.incremental) {
+                    // Only new messages came back - append them to what we have.
+                    (data.messages || []).forEach(m => {
+                        if (!chatMessages.some(x => x._id === m._id)) appendNewMessage(m);
+                    });
+                } else {
+                    displayMessages(data.messages);
+                }
+                const newest = (data.messages || []).reduce(
+                    (a, m) => (!a || m.timestamp > a) ? m.timestamp : a, chatNewestTimestamp);
+                if (newest) chatNewestTimestamp = newest;
                 
                 // Mark messages as read only if can interact
                 if (canInteract) {
@@ -310,8 +327,9 @@
 
     // Store messages globally for image viewing
     let chatMessages = [];
-    let chatRenderedKey = null;   // signature of what is currently in the DOM
+    let chatRenderedKey = null;      // signature of what is currently in the DOM
     let chatFirstRender = true;
+    let chatNewestTimestamp = null;  // high-water mark for incremental fetches
 
     // Distance from the bottom (px) still counted as "following the conversation".
     const CHAT_STICK_THRESHOLD = 60;
@@ -909,5 +927,8 @@
     loadChat();
 
     // Auto-refresh chat every 5 seconds
-    setInterval(loadChat, 5000);
+    // Socket.IO delivers messages as they are sent. This is only a reconcile in
+    // case an event was missed while the socket was down - and thanks to ?since=
+    // it costs well under a hundred bytes.
+    setInterval(loadChat, 60000);
 </script>

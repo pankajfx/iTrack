@@ -734,6 +734,103 @@ DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE     = 200
 
 
+# ─── Dashboard buckets ───────────────────────────────────────────────────────
+# Each dashboard tab is a named bucket. These used to be predicates evaluated in
+# the browser over the entire tracker list; they now run in Mongo so the
+# dashboards can fetch one page at a time. The rules are transcribed from the
+# client code they replace and are DIFFERENT per side - keep them that way:
+#
+#   FE  unassigned  status == waiting_noc_assignment
+#       ongoing     status not in (waiting, installation_complete, completed)
+#       completed   status in (installation_complete, completed), dated by completed_at
+#       me          fe.id == current user
+#   NOC unassigned  no noc_assignee AND status != installation_complete
+#       ongoing     has noc_assignee AND status != installation_complete
+#       completed   status == installation_complete, dated by completed_at
+#       me          noc_assignee == current user
+#
+# Date ranges: the client's isInDateRange() rejects a missing date for every role
+# except FIELD_ENGINEER, which is exempt from date filtering entirely. range_bounds()
+# reproduces both halves of that.
+FE_DONE_STATES = [STATUS_COMPLETE, 'completed']
+FE_BUCKETS  = ('unassigned-me', 'unassigned-overall', 'ongoing-me',
+               'ongoing-overall', 'completed-me', 'completed-overall')
+NOC_BUCKETS = ('unassigned', 'ongoing-me', 'ongoing-overall',
+               'completed-me', 'completed-overall')
+
+
+def dashboard_side():
+    return 'noc' if session.get('role') in NOC_ROLES else 'fe'
+
+
+def range_bounds():
+    """(from, to) naive-UTC datetimes from ?from=&to=, or (None, None) if unfiltered."""
+    if session.get('role') == ROLE_FE:
+        return None, None                      # FE is exempt, as in isInDateRange()
+
+    def parse(param):
+        raw = request.args.get(param)
+        if not raw:
+            return None
+        try:
+            return datetime.fromisoformat(raw.replace('Z', '')[:26])
+        except ValueError:
+            return None
+    return parse('from'), parse('to')
+
+
+def _dated(field, frm, to):
+    if frm is None and to is None:
+        return {}
+    cond = {}
+    if frm is not None:
+        cond['$gte'] = frm
+    if to is not None:
+        cond['$lte'] = to
+    return {field: cond}
+
+
+def bucket_query(name, frm=None, to=None):
+    """Mongo filter for one dashboard bucket, or None if the name is unknown."""
+    uid = session.get('user_id')
+    if dashboard_side() == 'fe':
+        mine = {'fe.id': uid}
+        rules = {
+            'unassigned': ({'status': STATUS_WAITING_NOC}, 'created_at'),
+            'ongoing':    ({'status': {'$nin': FE_DONE_STATES + [STATUS_WAITING_NOC]}}, 'created_at'),
+            'completed':  ({'status': {'$in': FE_DONE_STATES}}, 'completed_at'),
+        }
+        valid = FE_BUCKETS
+    else:
+        mine = {'noc_assignee': uid}
+        rules = {
+            'unassigned': ({'noc_assignee': {'$in': [None, '']},
+                            'status': {'$ne': STATUS_COMPLETE}}, 'created_at'),
+            'ongoing':    ({'noc_assignee': {'$nin': [None, '']},
+                            'status': {'$ne': STATUS_COMPLETE}}, 'created_at'),
+            'completed':  ({'status': STATUS_COMPLETE}, 'completed_at'),
+        }
+        valid = NOC_BUCKETS
+    if name not in valid:
+        return None
+    kind, _, who = name.partition('-')
+    base, date_field = rules[kind]
+    q = dict(base)
+    if who == 'me':
+        # `mine` may set noc_assignee, which must win over the "has an assignee"
+        # condition of the ongoing rule.
+        q.update(mine)
+    q.update(_dated(date_field, frm, to))
+    return q
+
+
+def dashboard_scope():
+    """Everything the current user may see on their dashboard, or None."""
+    if dashboard_side() == 'noc':
+        return {}
+    return fe_visibility_query()
+
+
 def fe_visibility_query():
     """Mongo filter for what the current FE-side user may see.
 
@@ -775,7 +872,19 @@ def paginate_args():
 
 
 def tracker_page(query, sort_dir=-1):
-    """Projected, sorted, paginated tracker list + the total for that query."""
+    """Projected, sorted, paginated tracker list + the total for that query.
+
+    ?filter=<bucket> narrows to one dashboard tab (see bucket_query), with
+    ?from=&to= applied the way the tab's date field requires.
+    """
+    name = request.args.get('filter')
+    if name:
+        frm, to = range_bounds()
+        bq = bucket_query(name, frm, to)
+        if bq is None:
+            return {'trackers': [], 'total': 0, 'returned': 0, 'has_more': False,
+                    'error': f'unknown filter {name!r}'}
+        query = {'$and': [query, bq]} if query else bq
     skip, limit = paginate_args()
     cursor = mongo.db.trackers.find(query, TRACKER_LIST_PROJECTION).sort('created_at', sort_dir)
     if limit:
@@ -833,73 +942,116 @@ def api_my_installations():
 @app.route('/api/trackers/counts')
 @login_required
 def api_tracker_counts():
-    """The six dashboard badge counts, in one aggregation.
+    """Badge counts for every tab on the caller's dashboard, in one $facet pass.
 
-    These used to be six client-side passes over the whole tracker list, so the
-    tabs could not render until a multi-megabyte payload had downloaded and
-    parsed - the "landing page takes forever to show counts" symptom
-    (PROJECT_GUIDE section 15.2, cause 4). This answers off the indexes in a few
-    hundred bytes.
+    Response: {buckets: {<tab name>: n}, avg_completion_ms: {overall, me},
+               by_status: {...}, total}
 
-    Query params: from / to (ISO dates, inclusive) mirror the dashboard's range
-    picker. Ranges apply to created_at, except for completed which uses
-    completed_at - matching the client logic exactly.
+    Tab names match the client filter ids exactly, and the rules differ between
+    the FE and NOC dashboards - see bucket_query(). Average completion is taken
+    over completed trackers that carry both timestamps, dated by completed_at,
+    which is what the old client-side updateStats() computed.
     """
-    role = session.get('role')
-    if role in NOC_ROLES:
-        scope = {}
-        mine = {'noc_assignee': session['user_id']}
-    else:
-        scope = fe_visibility_query()
-        mine = {'fe.id': session['user_id']}
+    scope = dashboard_scope()
     if scope is None:
-        return jsonify({'total': 0})
+        return jsonify({'buckets': {}, 'avg_completion_ms': {}, 'by_status': {}, 'total': 0})
 
-    def parse(param):
-        raw = request.args.get(param)
-        if not raw:
+    frm, to = range_bounds()
+    names = NOC_BUCKETS if dashboard_side() == 'noc' else FE_BUCKETS
+    facet = {name: [{'$match': bucket_query(name, frm, to)}, {'$count': 'n'}] for name in names}
+
+    for who in ('overall', 'me'):
+        q = bucket_query('completed-' + who, frm, to)
+        q = {'$and': [q, {'created_at': {'$ne': None}, 'completed_at': {'$ne': None}}]}
+        facet['avg_' + who] = [
+            {'$match': q},
+            {'$group': {'_id': None, 'ms': {'$avg': {'$subtract': ['$completed_at', '$created_at']}}}},
+        ]
+    facet['by_status'] = [{'$group': {'_id': '$status', 'n': {'$sum': 1}}}]
+
+    row = next(iter(mongo.db.trackers.aggregate([{'$match': scope}, {'$facet': facet}])), {})
+    buckets = {name: (row.get(name) or [{}])[0].get('n', 0) for name in names}
+    avg = {who: ((row.get('avg_' + who) or [{}])[0].get('ms')) for who in ('overall', 'me')}
+    by_status = {r['_id']: r['n'] for r in row.get('by_status', [])}
+    return jsonify({'buckets': buckets, 'avg_completion_ms': avg,
+                    'by_status': by_status, 'total': sum(by_status.values())})
+
+
+# Fields the dashboard search covers: (label, dotted path). The old client search
+# also looked at sim1_number, sim2_number, device_serial and noc_assignee_username
+# - none of which exist on any tracker, so SIM search never matched anything. The
+# real SIM numbers live under sim.simN.number; the NOC engineer is matched by
+# name through the users collection below.
+SEARCH_FIELDS = [
+    ('SDWAN ID',    'sdwan_id'),
+    ('Customer',    'customer'),
+    ('FE Name',     'fe.name'),
+    ('FE Username', 'fe.username'),
+    ('FE Phone',    'fe.phone'),
+    ('SIM1 Number', 'sim.sim1.number'),
+    ('SIM2 Number', 'sim.sim2.number'),
+    ('Tracker ID',  'tracker_id'),
+]
+SEARCH_LIMIT = 100
+
+
+def _dig(doc, path):
+    for part in path.split('.'):
+        if not isinstance(doc, dict):
             return None
-        try:
-            return datetime.fromisoformat(raw.replace('Z', ''))
-        except ValueError:
-            return None
+        doc = doc.get(part)
+    return doc
 
-    frm, to = parse('from'), parse('to')
 
-    def ranged(field):
-        if frm is None and to is None:
-            return {}
-        bounds = {}
-        if frm is not None:
-            bounds['$gte'] = frm
-        if to is not None:
-            bounds['$lte'] = to
-        return {field: bounds}
+@app.route('/api/trackers/search')
+@login_required
+def api_tracker_search():
+    """Case-insensitive substring search across the caller's visible trackers.
 
-    done_states     = [STATUS_COMPLETE, 'completed']
-    not_started     = STATUS_WAITING_NOC
-    ongoing_exclude = done_states + [not_started]
+    The query is escaped: it is a literal substring, never a regex. The NOC
+    dashboard used to compile user input straight into a RegExp; doing that on
+    the server would let anyone who can log in submit a catastrophic pattern.
+    """
+    term = (request.args.get('q') or '').strip()
+    if not term:
+        return jsonify({'results': [], 'total': 0, 'truncated': False})
+    if len(term) > 100:
+        return jsonify({'error': 'Search term too long'}), 400
 
-    buckets = {
-        'unassigned_overall': {'status': not_started, **ranged('created_at')},
-        'unassigned_me':      {'status': not_started, **mine, **ranged('created_at')},
-        'ongoing_overall':    {'status': {'$nin': ongoing_exclude}, **ranged('created_at')},
-        'ongoing_me':         {'status': {'$nin': ongoing_exclude}, **mine, **ranged('created_at')},
-        'completed_overall':  {'status': {'$in': done_states}, **ranged('completed_at')},
-        'completed_me':       {'status': {'$in': done_states}, **mine, **ranged('completed_at')},
-    }
+    scope = dashboard_scope()
+    if scope is None:
+        return jsonify({'results': [], 'total': 0, 'truncated': False})
 
-    # $facet runs every bucket in a single pass instead of six round trips.
-    facet = {name: [{'$match': q}, {'$count': 'n'}] for name, q in buckets.items()}
-    result = next(iter(mongo.db.trackers.aggregate([{'$match': scope}, {'$facet': facet}])), {})
-    counts = {name: (rows[0]['n'] if rows else 0) for name, rows in result.items()}
+    literal = re.escape(term)
+    pattern = re.compile(literal, re.IGNORECASE)
+    ors = [{path: {'$regex': literal, '$options': 'i'}} for _, path in SEARCH_FIELDS]
 
-    by_status = mongo.db.trackers.aggregate([
-        {'$match': scope}, {'$group': {'_id': '$status', 'n': {'$sum': 1}}},
-    ])
-    counts['by_status'] = {r['_id']: r['n'] for r in by_status}
-    counts['total'] = sum(counts['by_status'].values())
-    return jsonify(counts)
+    noc_names = {}
+    for u in mongo.db.users.find({'role': {'$in': list(NOC_ROLES)},
+                                  '$or': [{'name': {'$regex': literal, '$options': 'i'}},
+                                          {'username': {'$regex': literal, '$options': 'i'}}]},
+                                 {'name': 1, 'username': 1}):
+        noc_names[str(u['_id'])] = u.get('name') or u.get('username')
+    if noc_names:
+        ors.append({'noc_assignee': {'$in': list(noc_names)}})
+
+    query = {'$and': [scope, {'$or': ors}]} if scope else {'$or': ors}
+    total = mongo.db.trackers.count_documents(query)
+    docs = list(mongo.db.trackers.find(query, TRACKER_LIST_PROJECTION)
+                                 .sort('created_at', -1).limit(SEARCH_LIMIT))
+
+    results = []
+    for d in serialize_doc(docs):
+        matches = []
+        for label, path in SEARCH_FIELDS:
+            v = _dig(d, path)
+            if v is not None and pattern.search(str(v)):
+                matches.append({'field': label, 'value': str(v)})
+        if d.get('noc_assignee') in noc_names:
+            matches.append({'field': 'NOC Engineer', 'value': noc_names[d['noc_assignee']]})
+        results.append({'tracker': d, 'matches': matches})
+
+    return jsonify({'results': results, 'total': total, 'truncated': total > len(results)})
 
 
 @app.route('/api/noc/users/stats')

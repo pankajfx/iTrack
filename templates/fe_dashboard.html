@@ -821,7 +821,6 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
 </style>
 
 <script>
-    let allInstallations = [];
     {% if session.role == 'FIELD_SUPPORT' or session.role == 'FIELD_SUPPORT_GROUP' or session.role == 'FIELD_ENGINEER_GROUP' %}
     let currentFilter = 'unassigned-overall';
     {% else %}
@@ -834,29 +833,68 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
     let currentPage = 1;
     const PAGE_SIZE = 20;
 
-    async function loadInstallations() {
+
+    const FILTER_TITLES = {
+        'unassigned-me':      'My Unassigned Installations',
+        'unassigned-overall': 'All Unassigned Installations',
+        'ongoing-me':         'My Ongoing Installations',
+        'completed-me':       'My Completed Installations',
+        'ongoing-overall':    'All Ongoing Installations',
+        'completed-overall':  'All Completed Installations',
+    };
+
+    // The page of the current tab is fetched from the server; the browser no longer
+    // holds every tracker. Tab membership, counts and search all run in Mongo -
+    // see bucket_query() in app.py for the exact rules each tab applies.
+    let pageInstallations = [];
+    let listTotal = 0;
+    let pageRequestSeq = 0;
+
+    function dashboardQuery(extra) {
+        const qs = new URLSearchParams(extra || {});
+        const r = dateRangeBounds();
+        if (r.from) qs.set('from', r.from);
+        if (r.to)   qs.set('to', r.to);
+        return qs;
+    }
+
+    async function loadPage() {
+        const seq = ++pageRequestSeq;
+        const list = document.getElementById('installations-list');
+        if (list) list.style.opacity = '0.5';
         try {
-            // limit=0 keeps the full list: KPIs, drill-downs and search all read
-            // from allInstallations. The heavy image blobs are gone server-side
-            // (TRACKER_LIST_PROJECTION), which is where the payload win comes from.
-            const response = await fetch('/api/trackers/all-fe?limit=0');
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('API Error Response:', errorText);
-                throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
-            }
+            const qs = dashboardQuery({ filter: currentFilter, page: currentPage, limit: PAGE_SIZE });
+            const response = await fetch('/api/trackers/all-fe?' + qs);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
-            allInstallations = data.trackers || [];
-            
-            console.log(`Loaded ${allInstallations.length} installations`);
-            
-            updateStats();
+            if (seq !== pageRequestSeq) return;      // superseded by a newer tab/page click
+            const totalPages = Math.max(1, Math.ceil((data.total || 0) / PAGE_SIZE));
+            if (data.total > 0 && currentPage > totalPages) {
+                // The tab shrank since the last render - land on its new last page.
+                currentPage = totalPages;
+                return loadPage();
+            }
+            pageInstallations = data.trackers || [];
+            listTotal = data.total || 0;
             displayInstallations();
-            loadHierarchyView();
         } catch (error) {
-            console.error('Error loading installations:', error);
-            showToast('Failed to load installations', 'error');
+            if (seq !== pageRequestSeq) return;
+            console.error('Error loading trackers:', error);
+            showToast('Failed to load trackers', 'error');
+        } finally {
+            if (seq === pageRequestSeq && list) list.style.opacity = '';
         }
+    }
+
+    // Re-query counts and the visible page for the current tab and date range.
+    function refreshDashboard() {
+        loadBadgeCounts();
+        loadPage();
+    }
+
+    async function loadInstallations() {
+        await Promise.all([loadBadgeCounts(), loadPage()]);
+        loadHierarchyView();
     }
 
     async function loadHierarchyView() {
@@ -911,7 +949,6 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
     function setDateRange(range) {
         currentRange = range;
         currentPage = 1;
-        loadBadgeCounts();
 
         // Debug: Uncomment to troubleshoot date range issues
         // console.log('Setting date range:', range);
@@ -935,8 +972,7 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
         // const { from, to } = getDateRange();
         // console.log('Date range set:', { range: range, from: from.toISOString(), to: to.toISOString() });
         
-        updateStats();
-        displayInstallations();
+        refreshDashboard();
     }
 
     function toggleCustomRange() {
@@ -961,8 +997,11 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
             return;
         }
         
-        customDateFrom = new Date(fromInput);
-        customDateTo = new Date(toInput);
+        // 'YYYY-MM-DD' alone parses as UTC midnight, which for IST users shifted
+        // the range by 5.5 hours and dropped most of the last day. Local midnight
+        // to local end-of-day makes both ends inclusive of the whole calendar day.
+        customDateFrom = new Date(fromInput + 'T00:00:00');
+        customDateTo = new Date(toInput + 'T23:59:59');
         
         // Debug: Uncomment to troubleshoot custom range issues
         // console.log('Parsed custom dates:', { customDateFrom: customDateFrom.toISOString(), customDateTo: customDateTo.toISOString() });
@@ -1014,188 +1053,37 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
         return { from, to };
     }
 
-    function isInDateRange(date) {
-        // FIELD_ENGINEER role always sees all data (no date filtering)
-        const role = '{{ session.role }}';
-        if (role === 'FIELD_ENGINEER') return true;
-        
-        if (!date) return false;
-        const { from, to } = getDateRange();
-        const checkDate = new Date(date);
-        
-        // Debug: Uncomment to troubleshoot date filtering issues
-        // console.log('Date Range Check:', { checkDate: checkDate.toISOString(), from: from.toISOString(), to: to.toISOString(), inRange: checkDate >= from && checkDate <= to });
-        
-        return checkDate >= from && checkDate <= to;
-    }
-
-    function updateStats() {
-        // Unassigned Me (current user's unassigned trackers) - NOW filtered by date range
-        const unassignedMe = allInstallations.filter(t => 
-            t.status === 'waiting_noc_assignment' && t.fe.id === currentUserId && isInDateRange(t.created_at)
-        ).length;
-        
-        // Unassigned Overall (all FE users' unassigned trackers) - NOW filtered by date range
-        const unassignedOverall = allInstallations.filter(t => 
-            t.status === 'waiting_noc_assignment' && isInDateRange(t.created_at)
-        ).length;
-        
-        // Overall stats (all FE users) - filtered by date range
-        const overallOngoing = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return t.status !== 'waiting_noc_assignment' && !isCompleted && isInDateRange(t.created_at);
-        }).length;
-        
-        const overallCompleted = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return isCompleted && isInDateRange(t.completed_at);
-        }).length;
-        
-        // Calculate overall average completion time
-        const overallCompletedTrackers = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return isCompleted && t.completed_at && t.created_at && isInDateRange(t.completed_at);
-        });
-        
-        let overallAvgTime = '-';
-        if (overallCompletedTrackers.length > 0) {
-            const totalTime = overallCompletedTrackers.reduce((sum, t) => {
-                const created = new Date(t.created_at);
-                const completed = new Date(t.completed_at);
-                return sum + (completed - created);
-            }, 0);
-            const avgMs = totalTime / overallCompletedTrackers.length;
-            overallAvgTime = formatDuration(avgMs);
-        }
-        
-        // My stats (current user) - filtered by date range
-        const meOngoing = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return t.fe.id === currentUserId && t.status !== 'waiting_noc_assignment' && !isCompleted && isInDateRange(t.created_at);
-        }).length;
-        
-        const meCompleted = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return t.fe.id === currentUserId && isCompleted && isInDateRange(t.completed_at);
-        }).length;
-        
-        // Calculate my average completion time
-        const meCompletedTrackers = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return t.fe.id === currentUserId && isCompleted && t.completed_at && t.created_at && isInDateRange(t.completed_at);
-        });
-        
-        let meAvgTime = '-';
-        if (meCompletedTrackers.length > 0) {
-            const totalTime = meCompletedTrackers.reduce((sum, t) => {
-                const created = new Date(t.created_at);
-                const completed = new Date(t.completed_at);
-                return sum + (completed - created);
-            }, 0);
-            const avgMs = totalTime / meCompletedTrackers.length;
-            meAvgTime = formatDuration(avgMs);
-        }
-        
-        // Update UI (with null checks for elements that may not exist)
-        const statOverallOngoing = document.getElementById('stat-overall-ongoing');
-        const statOverallCompleted = document.getElementById('stat-overall-completed');
-        const statOverallAvg = document.getElementById('stat-overall-avg');
-        
-        if (statOverallOngoing) statOverallOngoing.textContent = overallOngoing;
-        if (statOverallCompleted) statOverallCompleted.textContent = overallCompleted;
-        if (statOverallAvg) statOverallAvg.textContent = overallAvgTime;
-        
-        // Note: stat-me elements removed from FE dashboard (moved to filter buttons only)
-        
-        // Update badge counters
-        updateBadges();
-    }
-
-    // Badge counts straight from the server: index-only, a few hundred bytes, and
-    // independent of the list download. Called before loadInstallations() so the
-    // tabs populate immediately instead of after the full payload parses.
+    // Tab counts, the stat tiles and the average completion time come from one
+    // server aggregation (/api/trackers/counts), honouring the same date range.
     async function loadBadgeCounts() {
         try {
-            const qs = new URLSearchParams();
-            const r = dateRangeBounds();
-            if (r.from) qs.set('from', r.from);
-            if (r.to)   qs.set('to', r.to);
-            const res = await fetch('/api/trackers/counts' + (qs.toString() ? '?' + qs : ''));
+            const res = await fetch('/api/trackers/counts?' + dashboardQuery());
             if (!res.ok) return;
             const c = await res.json();
-            applyBadges(c.unassigned_me, c.unassigned_overall, c.ongoing_me,
-                        c.completed_me, c.ongoing_overall, c.completed_overall);
+            const b = c.buckets || {};
+            const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.textContent = v; };
+            set('badge-unassigned-me', b['unassigned-me']);
+            set('badge-unassigned-overall', b['unassigned-overall']);
+            set('badge-ongoing-me', b['ongoing-me']);
+            set('badge-completed-me', b['completed-me']);
+            set('badge-ongoing-overall', b['ongoing-overall']);
+            set('badge-completed-overall', b['completed-overall']);
+            const avg = c.avg_completion_ms || {};
+            set('stat-overall-ongoing', b['ongoing-overall']);
+            set('stat-overall-completed', b['completed-overall']);
+            set('stat-overall-avg', avg.overall != null ? formatDuration(avg.overall) : '-');
         } catch (e) {
-            // Non-fatal: updateBadges() recomputes from the list once it lands.
-            console.warn('Badge counts unavailable, falling back to list:', e);
+            console.warn('Badge counts unavailable:', e);
         }
     }
 
-    // Reuses getDateRange() so the server-side counts and the client-side filter
-    // can never drift apart. FE role is exempt from date filtering, matching
-    // isInDateRange().
+    // The current range picker as ISO bounds. FIELD_ENGINEER is exempt from date
+    // filtering (the server enforces the same), so it sends none.
     function dateRangeBounds() {
         if ('{{ session.role }}' === 'FIELD_ENGINEER') return {};
         const { from, to } = getDateRange();
         return { from: from.toISOString().slice(0, 19),
                  to:   to.toISOString().slice(0, 19) };
-    }
-
-    function applyBadges(unassignedMeCount, unassignedOverallCount, ongoingMeCount,
-                         completedMeCount, ongoingOverallCount, completedOverallCount) {
-        const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.textContent = v; };
-        set('badge-unassigned-me', unassignedMeCount);
-        set('badge-unassigned-overall', unassignedOverallCount);
-        set('badge-ongoing-me', ongoingMeCount);
-        set('badge-completed-me', completedMeCount);
-        set('badge-ongoing-overall', ongoingOverallCount);
-        set('badge-completed-overall', completedOverallCount);
-    }
-
-    function updateBadges() {
-        // Calculate counts for each filter with date range applied
-        const unassignedMeCount = allInstallations.filter(t => 
-            t.status === 'waiting_noc_assignment' && t.fe.id === currentUserId && isInDateRange(t.created_at)
-        ).length;
-        
-        const unassignedOverallCount = allInstallations.filter(t => 
-            t.status === 'waiting_noc_assignment' && isInDateRange(t.created_at)
-        ).length;
-        
-        const ongoingMeCount = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return t.fe.id === currentUserId && t.status !== 'waiting_noc_assignment' && !isCompleted && isInDateRange(t.created_at);
-        }).length;
-        
-        const completedMeCount = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return t.fe.id === currentUserId && isCompleted && isInDateRange(t.completed_at);
-        }).length;
-        
-        const ongoingOverallCount = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return t.status !== 'waiting_noc_assignment' && !isCompleted && isInDateRange(t.created_at);
-        }).length;
-        
-        const completedOverallCount = allInstallations.filter(t => {
-            const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-            return isCompleted && isInDateRange(t.completed_at);
-        }).length;
-        
-        // Update badge UI (with null checks for elements that may not exist)
-        const badgeUnassignedMe = document.getElementById('badge-unassigned-me');
-        const badgeUnassignedOverall = document.getElementById('badge-unassigned-overall');
-        const badgeOngoingMe = document.getElementById('badge-ongoing-me');
-        const badgeCompletedMe = document.getElementById('badge-completed-me');
-        const badgeOngoingOverall = document.getElementById('badge-ongoing-overall');
-        const badgeCompletedOverall = document.getElementById('badge-completed-overall');
-        
-        if (badgeUnassignedMe) badgeUnassignedMe.textContent = unassignedMeCount;
-        if (badgeUnassignedOverall) badgeUnassignedOverall.textContent = unassignedOverallCount;
-        if (badgeOngoingMe) badgeOngoingMe.textContent = ongoingMeCount;
-        if (badgeCompletedMe) badgeCompletedMe.textContent = completedMeCount;
-        if (badgeOngoingOverall) badgeOngoingOverall.textContent = ongoingOverallCount;
-        if (badgeCompletedOverall) badgeCompletedOverall.textContent = completedOverallCount;
     }
 
     function formatDuration(ms) {
@@ -1230,7 +1118,7 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
             }
         });
 
-        displayInstallations();
+        loadPage();
     }
 
     function displayInstallations() {
@@ -1241,58 +1129,10 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
         const listCount = document.getElementById('list-count');
 
         loadingState.classList.add('hidden');
+        listTitle.textContent = FILTER_TITLES[currentFilter] || '';
+        listCount.textContent = `(${listTotal})`;
 
-        let filtered = allInstallations;
-        let titleText = '';
-        
-        // Apply filter with date range
-        if (currentFilter === 'unassigned-me') {
-            filtered = allInstallations.filter(t => {
-                const inRange = isInDateRange(t.created_at);
-                // Debug: Uncomment to troubleshoot filtering issues
-                // console.log('Unassigned-me check:', t.sdwan_id, 'created_at:', t.created_at, 'inRange:', inRange);
-                return t.status === 'waiting_noc_assignment' && t.fe.id === currentUserId && inRange;
-            });
-            titleText = 'My Unassigned Installations';
-        } else if (currentFilter === 'unassigned-overall') {
-            filtered = allInstallations.filter(t => {
-                const inRange = isInDateRange(t.created_at);
-                // Debug: Uncomment to troubleshoot filtering issues
-                // console.log('Unassigned-overall check:', t.sdwan_id, 'created_at:', t.created_at, 'inRange:', inRange);
-                return t.status === 'waiting_noc_assignment' && inRange;
-            });
-            titleText = 'All Unassigned Installations';
-        } else if (currentFilter === 'ongoing-me') {
-            filtered = allInstallations.filter(t => {
-                const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-                return t.fe.id === currentUserId && t.status !== 'waiting_noc_assignment' && !isCompleted && isInDateRange(t.created_at);
-            });
-            titleText = 'My Ongoing Installations';
-        } else if (currentFilter === 'completed-me') {
-            filtered = allInstallations.filter(t => {
-                const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-                return t.fe.id === currentUserId && isCompleted && isInDateRange(t.completed_at);
-            });
-            titleText = 'My Completed Installations';
-        } else if (currentFilter === 'ongoing-overall') {
-            filtered = allInstallations.filter(t => {
-                const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-                return t.status !== 'waiting_noc_assignment' && !isCompleted && isInDateRange(t.created_at);
-            });
-            titleText = 'All Ongoing Installations';
-        } else if (currentFilter === 'completed-overall') {
-            filtered = allInstallations.filter(t => {
-                const isCompleted = t.status === 'installation_complete' || t.status === 'completed';
-                return isCompleted && isInDateRange(t.completed_at);
-            });
-            titleText = 'All Completed Installations';
-        }
-
-        // Update list title and count
-        listTitle.textContent = titleText;
-        listCount.textContent = `(${filtered.length})`;
-
-        if (filtered.length === 0) {
+        if (listTotal === 0 || pageInstallations.length === 0) {
             emptyState.classList.remove('hidden');
             container.innerHTML = '';
             renderPagination(0, 0);
@@ -1300,14 +1140,9 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
         }
 
         emptyState.classList.add('hidden');
+        const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
 
-        const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-        if (currentPage > totalPages) currentPage = totalPages;
-        if (currentPage < 1) currentPage = 1;
-        const startIdx = (currentPage - 1) * PAGE_SIZE;
-        const pageItems = filtered.slice(startIdx, startIdx + PAGE_SIZE);
-
-        container.innerHTML = pageItems.map(tracker => {
+        container.innerHTML = pageInstallations.map(tracker => {
             const progress = calculateProgress(tracker);
             const statusInfo = getStatusInfo(tracker.status);
             const isMyInstallation = tracker.fe.id === currentUserId;
@@ -1367,7 +1202,7 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
             `;
         }).join('');
 
-        renderPagination(filtered.length, totalPages);
+        renderPagination(listTotal, totalPages);
     }
 
     function renderPagination(totalItems, totalPages) {
@@ -1420,7 +1255,7 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
 
     function goToPage(page) {
         currentPage = page;
-        displayInstallations();
+        loadPage();
         const container = document.getElementById('installations-container');
         if (container) container.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -1545,90 +1380,33 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
         hapticFeedback('light');
     }
 
-    function performSearch() {
+    async function performSearch() {
         const input = document.getElementById('search-input');
         if (!input) {
             showToast('Search box not found', 'error');
             return;
         }
-        
         const query = input.value.trim();
-        
         if (!query) {
             showToast('Please enter a search term', 'error');
             return;
         }
-
         hapticFeedback('medium');
-
         try {
-            // Escape special regex characters to treat search as literal string
-            const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            // Create regex pattern (case-insensitive)
-            const regex = new RegExp(escapedQuery, 'i');
-            const results = [];
-
-            allInstallations.forEach(tracker => {
-                const matches = [];
-
-                // Search SDWAN ID
-                if (tracker.sdwan_id && regex.test(tracker.sdwan_id)) {
-                    matches.push({ field: 'SDWAN ID', value: tracker.sdwan_id });
-                }
-
-                // Search Customer
-                if (tracker.customer && regex.test(tracker.customer)) {
-                    matches.push({ field: 'Customer', value: tracker.customer });
-                }
-
-                // Search FE Name
-                if (tracker.fe && tracker.fe.name && regex.test(tracker.fe.name)) {
-                    matches.push({ field: 'FE Name', value: tracker.fe.name });
-                }
-
-                // Search FE Username
-                if (tracker.fe && tracker.fe.username && regex.test(tracker.fe.username)) {
-                    matches.push({ field: 'FE Username', value: tracker.fe.username });
-                }
-
-                // Search FE Phone
-                if (tracker.fe && tracker.fe.phone && regex.test(tracker.fe.phone)) {
-                    matches.push({ field: 'FE Phone', value: tracker.fe.phone });
-                }
-
-                // Search NOC Assignee Username
-                if (tracker.noc_assignee_username && regex.test(tracker.noc_assignee_username)) {
-                    matches.push({ field: 'NOC Engineer', value: tracker.noc_assignee_username });
-                }
-
-                // Search SIM1 Number
-                if (tracker.sim1_number && regex.test(tracker.sim1_number)) {
-                    matches.push({ field: 'SIM1 Number', value: tracker.sim1_number });
-                }
-
-                // Search SIM2 Number
-                if (tracker.sim2_number && regex.test(tracker.sim2_number)) {
-                    matches.push({ field: 'SIM2 Number', value: tracker.sim2_number });
-                }
-
-                // Search Device Serial
-                if (tracker.device_serial && regex.test(tracker.device_serial)) {
-                    matches.push({ field: 'Device Serial', value: tracker.device_serial });
-                }
-
-                if (matches.length > 0) {
-                    results.push({ tracker, matches });
-                }
-            });
-
-            displaySearchResults(results);
+            // Runs on the server over everything the user may see. The term is a
+            // literal substring, never a regex, across SDWAN ID, customer, FE
+            // details, SIM numbers, tracker ID and NOC engineer.
+            const res = await fetch('/api/trackers/search?q=' + encodeURIComponent(query));
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            displaySearchResults(data.results || [], data.total, data.truncated);
         } catch (error) {
             console.error('Search error:', error);
             showToast('Search failed: ' + error.message, 'error');
         }
     }
 
-    function displaySearchResults(results) {
+    function displaySearchResults(results, total, truncated) {
         const searchResults = document.getElementById('search-results');
         const searchCount = document.getElementById('search-count');
         const searchList = document.getElementById('search-list');
@@ -1640,7 +1418,10 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
             return;
         }
 
-        searchCount.textContent = `Found ${results.length} tracker${results.length !== 1 ? 's' : ''}!`;
+        const found = (typeof total === 'number') ? total : results.length;
+        searchCount.textContent = truncated
+            ? `Found ${found} trackers - showing the newest ${results.length}. Refine your search to narrow it down.`
+            : `Found ${found} tracker${found !== 1 ? 's' : ''}!`;
         searchResults.classList.remove('hidden');
 
         if (results.length === 0) {
@@ -2461,12 +2242,11 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
 
     // Badges first - they are a few hundred bytes off an index, so the tabs fill
     // immediately rather than waiting on the full list download.
-    loadBadgeCounts();
     loadInstallations();
 
     // Safety-net reconcile. Socket.IO carries live updates; this only covers a
     // missed event or a dropped connection, so it can be slow.
-    setInterval(function () { loadBadgeCounts(); loadInstallations(); }, 120000);
+    setInterval(loadInstallations, 120000);
 
     // ─── Socket.IO Setup ─────────────────────────────────────────────────────────
     let reloadTimeout = null;

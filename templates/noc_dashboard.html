@@ -367,7 +367,6 @@
 </style>
 
 <script>
-    let allTrackers = [];
     {% if session.role == 'NOC_SUPPORT_GROUP' %}
     let currentFilter = 'ongoing-overall';
     {% else %}
@@ -380,22 +379,66 @@
     let currentPage = 1;
     const PAGE_SIZE = 20;
 
-    async function loadTrackers() {
+
+    const FILTER_TITLES = {
+        'unassigned':        'Unassigned Installations',
+        'ongoing-me':        'My Ongoing Installations',
+        'completed-me':      'My Completed Installations',
+        'ongoing-overall':   'All Ongoing Installations',
+        'completed-overall': 'All Completed Installations',
+    };
+
+    // The page of the current tab is fetched from the server; the browser no longer
+    // holds every tracker. Tab membership, counts and search all run in Mongo -
+    // see bucket_query() in app.py for the exact rules each tab applies.
+    let pageTrackers = [];
+    let listTotal = 0;
+    let pageRequestSeq = 0;
+
+    function dashboardQuery(extra) {
+        const qs = new URLSearchParams(extra || {});
+        const r = dateRangeBounds();
+        if (r.from) qs.set('from', r.from);
+        if (r.to)   qs.set('to', r.to);
+        return qs;
+    }
+
+    async function loadPage() {
+        const seq = ++pageRequestSeq;
+        const list = document.getElementById('trackers-list');
+        if (list) list.style.opacity = '0.5';
         try {
-            // Fetch all trackers (unassigned + all assigned)
-            // limit=0: KPIs, search and drill-downs read from the in-memory list. The
-            // payload win comes from TRACKER_LIST_PROJECTION dropping image blobs.
-            const response = await fetch('/api/trackers/all-noc?limit=0');
+            const qs = dashboardQuery({ filter: currentFilter, page: currentPage, limit: PAGE_SIZE });
+            const response = await fetch('/api/trackers/all-noc?' + qs);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             const data = await response.json();
-            
-            allTrackers = data.trackers || [];
-            
-            updateStats();
+            if (seq !== pageRequestSeq) return;      // superseded by a newer tab/page click
+            const totalPages = Math.max(1, Math.ceil((data.total || 0) / PAGE_SIZE));
+            if (data.total > 0 && currentPage > totalPages) {
+                // The tab shrank since the last render - land on its new last page.
+                currentPage = totalPages;
+                return loadPage();
+            }
+            pageTrackers = data.trackers || [];
+            listTotal = data.total || 0;
             displayTrackers();
         } catch (error) {
+            if (seq !== pageRequestSeq) return;
             console.error('Error loading trackers:', error);
             showToast('Failed to load trackers', 'error');
+        } finally {
+            if (seq === pageRequestSeq && list) list.style.opacity = '';
         }
+    }
+
+    // Re-query counts and the visible page for the current tab and date range.
+    function refreshDashboard() {
+        loadBadgeCounts();
+        loadPage();
+    }
+
+    async function loadTrackers() {
+        await Promise.all([loadBadgeCounts(), loadPage()]);
     }
 
     function setDateRange(range) {
@@ -424,8 +467,7 @@
         // const { from, to } = getDateRange();
         // console.log('Date range set:', { range: range, from: from.toISOString(), to: to.toISOString() });
         
-        updateStats();
-        displayTrackers();
+        refreshDashboard();
     }
 
     function toggleCustomRange() {
@@ -450,8 +492,11 @@
             return;
         }
         
-        customDateFrom = new Date(fromInput);
-        customDateTo = new Date(toInput);
+        // 'YYYY-MM-DD' alone parses as UTC midnight, which for IST users shifted
+        // the range by 5.5 hours and dropped most of the last day. Local midnight
+        // to local end-of-day makes both ends inclusive of the whole calendar day.
+        customDateFrom = new Date(fromInput + 'T00:00:00');
+        customDateTo = new Date(toInput + 'T23:59:59');
         
         // Debug: Uncomment to troubleshoot custom range issues
         // console.log('Parsed custom dates:', { customDateFrom: customDateFrom.toISOString(), customDateTo: customDateTo.toISOString() });
@@ -503,111 +548,28 @@
         return { from, to };
     }
 
-    function isInDateRange(date) {
-        if (!date) return false;
-        const { from, to } = getDateRange();
-        const checkDate = new Date(date);
-        
-        // Debug: Uncomment to troubleshoot date filtering issues
-        // console.log('Date Range Check:', { checkDate: checkDate.toISOString(), from: from.toISOString(), to: to.toISOString(), inRange: checkDate >= from && checkDate <= to });
-        
-        return checkDate >= from && checkDate <= to;
+    // Tab counts come from one server aggregation (/api/trackers/counts).
+    async function loadBadgeCounts() {
+        try {
+            const res = await fetch('/api/trackers/counts?' + dashboardQuery());
+            if (!res.ok) return;
+            const b = (await res.json()).buckets || {};
+            const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.textContent = v; };
+            set('badge-unassigned', b['unassigned']);
+            set('badge-ongoing-me', b['ongoing-me']);
+            set('badge-completed-me', b['completed-me']);
+            set('badge-ongoing-overall', b['ongoing-overall']);
+            set('badge-completed-overall', b['completed-overall']);
+        } catch (e) {
+            console.warn('Badge counts unavailable:', e);
+        }
     }
 
-    function updateStats() {
-        // Unassigned - NOW filtered by date range based on created_at
-        const unassigned = allTrackers.filter(t => {
-            return !t.noc_assignee && t.status !== 'installation_complete' && isInDateRange(t.created_at);
-        }).length;
-        
-        // Overall stats (all NOC users) - filtered by date range
-        const overallOngoing = allTrackers.filter(t => {
-            return t.noc_assignee && t.status !== 'installation_complete' && isInDateRange(t.created_at);
-        }).length;
-        
-        const overallCompleted = allTrackers.filter(t => {
-            return t.status === 'installation_complete' && isInDateRange(t.completed_at);
-        }).length;
-        
-        // Calculate overall average completion time
-        const overallCompletedTrackers = allTrackers.filter(t => {
-            return t.status === 'installation_complete' && t.completed_at && t.created_at && isInDateRange(t.completed_at);
-        });
-        
-        let overallAvgTime = '-';
-        if (overallCompletedTrackers.length > 0) {
-            const totalTime = overallCompletedTrackers.reduce((sum, t) => {
-                const created = new Date(t.created_at);
-                const completed = new Date(t.completed_at);
-                return sum + (completed - created);
-            }, 0);
-            const avgMs = totalTime / overallCompletedTrackers.length;
-            overallAvgTime = formatDuration(avgMs);
-        }
-        
-        // My stats (current user) - filtered by date range
-        const meOngoing = allTrackers.filter(t => {
-            return t.noc_assignee === currentUserId && t.status !== 'installation_complete' && isInDateRange(t.created_at);
-        }).length;
-        
-        const meCompleted = allTrackers.filter(t => {
-            return t.noc_assignee === currentUserId && t.status === 'installation_complete' && isInDateRange(t.completed_at);
-        }).length;
-        
-        // Calculate my average completion time
-        const meCompletedTrackers = allTrackers.filter(t => {
-            return t.noc_assignee === currentUserId && t.status === 'installation_complete' && t.completed_at && t.created_at && isInDateRange(t.completed_at);
-        });
-        
-        let meAvgTime = '-';
-        if (meCompletedTrackers.length > 0) {
-            const totalTime = meCompletedTrackers.reduce((sum, t) => {
-                const created = new Date(t.created_at);
-                const completed = new Date(t.completed_at);
-                return sum + (completed - created);
-            }, 0);
-            const avgMs = totalTime / meCompletedTrackers.length;
-            meAvgTime = formatDuration(avgMs);
-        }
-        
-        // Update badge counters
-        updateBadges();
-    }
-    
-    function updateBadges() {
-        // Calculate counts for each filter with date range applied
-        const unassignedCount = allTrackers.filter(t => {
-            return !t.noc_assignee && t.status !== 'installation_complete' && isInDateRange(t.created_at);
-        }).length;
-        
-        const ongoingMeCount = allTrackers.filter(t => {
-            return t.noc_assignee === currentUserId && t.status !== 'installation_complete' && isInDateRange(t.created_at);
-        }).length;
-        
-        const completedMeCount = allTrackers.filter(t => {
-            return t.noc_assignee === currentUserId && t.status === 'installation_complete' && isInDateRange(t.completed_at);
-        }).length;
-        
-        const ongoingOverallCount = allTrackers.filter(t => {
-            return t.noc_assignee && t.status !== 'installation_complete' && isInDateRange(t.created_at);
-        }).length;
-        
-        const completedOverallCount = allTrackers.filter(t => {
-            return t.status === 'installation_complete' && isInDateRange(t.completed_at);
-        }).length;
-        
-        // Update badge UI (with null checks for elements that may not exist based on role)
-        const badgeUnassigned = document.getElementById('badge-unassigned');
-        const badgeOngoingMe = document.getElementById('badge-ongoing-me');
-        const badgeCompletedMe = document.getElementById('badge-completed-me');
-        const badgeOngoingOverall = document.getElementById('badge-ongoing-overall');
-        const badgeCompletedOverall = document.getElementById('badge-completed-overall');
-        
-        if (badgeUnassigned) badgeUnassigned.textContent = unassignedCount;
-        if (badgeOngoingMe) badgeOngoingMe.textContent = ongoingMeCount;
-        if (badgeCompletedMe) badgeCompletedMe.textContent = completedMeCount;
-        if (badgeOngoingOverall) badgeOngoingOverall.textContent = ongoingOverallCount;
-        if (badgeCompletedOverall) badgeCompletedOverall.textContent = completedOverallCount;
+    // The current range picker as ISO bounds (NOC has no role exemption).
+    function dateRangeBounds() {
+        const { from, to } = getDateRange();
+        return { from: from.toISOString().slice(0, 19),
+                 to:   to.toISOString().slice(0, 19) };
     }
 
     function formatDuration(ms) {
@@ -641,7 +603,7 @@
             }
         });
 
-        displayTrackers();
+        loadPage();
     }
 
     function displayTrackers() {
@@ -652,61 +614,10 @@
         const listCount = document.getElementById('list-count');
 
         loadingState.classList.add('hidden');
+        listTitle.textContent = FILTER_TITLES[currentFilter] || '';
+        listCount.textContent = `(${listTotal})`;
 
-        let filtered = allTrackers;
-        
-        // Debug: Uncomment to troubleshoot filtering issues
-        // console.log('displayTrackers called, currentFilter:', currentFilter, 'currentRange:', currentRange);
-        // console.log('Total trackers:', allTrackers.length);
-        
-        // Apply filter with date range
-        if (currentFilter === 'unassigned') {
-            filtered = allTrackers.filter(t => {
-                const inRange = isInDateRange(t.created_at);
-                // Debug: Uncomment to troubleshoot filtering issues
-                // console.log('Unassigned check:', t.sdwan_id, 'created_at:', t.created_at, 'inRange:', inRange);
-                return !t.noc_assignee && t.status !== 'installation_complete' && inRange;
-            });
-            listTitle.textContent = 'Unassigned Installations';
-        } else if (currentFilter === 'ongoing-me') {
-            filtered = allTrackers.filter(t => {
-                const inRange = isInDateRange(t.created_at);
-                // Debug: Uncomment to troubleshoot filtering issues
-                // console.log('Ongoing-me check:', t.sdwan_id, 'created_at:', t.created_at, 'inRange:', inRange);
-                return t.noc_assignee === currentUserId && t.status !== 'installation_complete' && inRange;
-            });
-            listTitle.textContent = 'My Ongoing Installations';
-        } else if (currentFilter === 'completed-me') {
-            filtered = allTrackers.filter(t => {
-                const inRange = isInDateRange(t.completed_at);
-                // Debug: Uncomment to troubleshoot filtering issues
-                // console.log('Completed-me check:', t.sdwan_id, 'completed_at:', t.completed_at, 'inRange:', inRange);
-                return t.noc_assignee === currentUserId && t.status === 'installation_complete' && inRange;
-            });
-            listTitle.textContent = 'My Completed Installations';
-        } else if (currentFilter === 'ongoing-overall') {
-            filtered = allTrackers.filter(t => {
-                const inRange = isInDateRange(t.created_at);
-                // Debug: Uncomment to troubleshoot filtering issues
-                // console.log('Ongoing-overall check:', t.sdwan_id, 'created_at:', t.created_at, 'inRange:', inRange);
-                return t.noc_assignee && t.status !== 'installation_complete' && inRange;
-            });
-            listTitle.textContent = 'All Ongoing Installations';
-        } else if (currentFilter === 'completed-overall') {
-            filtered = allTrackers.filter(t => {
-                const inRange = isInDateRange(t.completed_at);
-                // Debug: Uncomment to troubleshoot filtering issues
-                // console.log('Completed-overall check:', t.sdwan_id, 'completed_at:', t.completed_at, 'inRange:', inRange);
-                return t.status === 'installation_complete' && inRange;
-            });
-            listTitle.textContent = 'All Completed Installations';
-        }
-
-        // Debug: Uncomment to troubleshoot filtering issues
-        // console.log('Filtered trackers:', filtered.length);
-        listCount.textContent = `(${filtered.length})`;
-
-        if (filtered.length === 0) {
+        if (listTotal === 0 || pageTrackers.length === 0) {
             emptyState.classList.remove('hidden');
             container.innerHTML = '';
             renderPagination(0, 0);
@@ -714,14 +625,9 @@
         }
 
         emptyState.classList.add('hidden');
+        const totalPages = Math.max(1, Math.ceil(listTotal / PAGE_SIZE));
 
-        const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-        if (currentPage > totalPages) currentPage = totalPages;
-        if (currentPage < 1) currentPage = 1;
-        const startIdx = (currentPage - 1) * PAGE_SIZE;
-        const pageItems = filtered.slice(startIdx, startIdx + PAGE_SIZE);
-
-        container.innerHTML = pageItems.map(tracker => {
+        container.innerHTML = pageTrackers.map(tracker => {
             const statusInfo = getStatusInfo(tracker.status);
             const isUnassigned = !tracker.noc_assignee;
             const isAssignedToMe = tracker.noc_assignee === currentUserId;
@@ -790,7 +696,7 @@
             `;
         }).join('');
 
-        renderPagination(filtered.length, totalPages);
+        renderPagination(listTotal, totalPages);
     }
 
     function renderPagination(totalItems, totalPages) {
@@ -843,7 +749,7 @@
 
     function goToPage(page) {
         currentPage = page;
-        displayTrackers();
+        loadPage();
         const container = document.getElementById('trackers-container');
         if (container) container.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
@@ -911,84 +817,41 @@
         document.getElementById('clear-search').classList.add('hidden');
     }
 
-    function performSearch() {
-        const query = document.getElementById('search-input').value.trim();
-        
+    async function performSearch() {
+        const input = document.getElementById('search-input');
+        if (!input) {
+            showToast('Search box not found', 'error');
+            return;
+        }
+        const query = input.value.trim();
         if (!query) {
             showToast('Please enter a search term', 'error');
             return;
         }
-
+        
         try {
-            // Create regex pattern (case-insensitive)
-            const regex = new RegExp(query, 'i');
-            const results = [];
-
-            allTrackers.forEach(tracker => {
-                const matches = [];
-
-                // Search SDWAN ID
-                if (regex.test(tracker.sdwan_id)) {
-                    matches.push({ field: 'SDWAN ID', value: tracker.sdwan_id });
-                }
-
-                // Search Customer
-                if (regex.test(tracker.customer)) {
-                    matches.push({ field: 'Customer', value: tracker.customer });
-                }
-
-                // Search FE Name
-                if (tracker.fe && regex.test(tracker.fe.name)) {
-                    matches.push({ field: 'FE Name', value: tracker.fe.name });
-                }
-
-                // Search FE Username
-                if (tracker.fe && regex.test(tracker.fe.username)) {
-                    matches.push({ field: 'FE Username', value: tracker.fe.username });
-                }
-
-                // Search FE Phone
-                if (tracker.fe && regex.test(tracker.fe.phone)) {
-                    matches.push({ field: 'FE Phone', value: tracker.fe.phone });
-                }
-
-                // Search NOC Assignee Username
-                if (tracker.noc_assignee_username && regex.test(tracker.noc_assignee_username)) {
-                    matches.push({ field: 'NOC Engineer', value: tracker.noc_assignee_username });
-                }
-
-                // Search SIM1 Number
-                if (tracker.sim1_number && regex.test(tracker.sim1_number)) {
-                    matches.push({ field: 'SIM1 Number', value: tracker.sim1_number });
-                }
-
-                // Search SIM2 Number
-                if (tracker.sim2_number && regex.test(tracker.sim2_number)) {
-                    matches.push({ field: 'SIM2 Number', value: tracker.sim2_number });
-                }
-
-                // Search Device Serial
-                if (tracker.device_serial && regex.test(tracker.device_serial)) {
-                    matches.push({ field: 'Device Serial', value: tracker.device_serial });
-                }
-
-                if (matches.length > 0) {
-                    results.push({ tracker, matches });
-                }
-            });
-
-            displaySearchResults(results);
+            // Runs on the server over everything the user may see. The term is a
+            // literal substring, never a regex, across SDWAN ID, customer, FE
+            // details, SIM numbers, tracker ID and NOC engineer.
+            const res = await fetch('/api/trackers/search?q=' + encodeURIComponent(query));
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            displaySearchResults(data.results || [], data.total, data.truncated);
         } catch (error) {
-            showToast('Invalid search pattern', 'error');
+            console.error('Search error:', error);
+            showToast('Search failed: ' + error.message, 'error');
         }
     }
 
-    function displaySearchResults(results) {
+    function displaySearchResults(results, total, truncated) {
         const searchResults = document.getElementById('search-results');
         const searchCount = document.getElementById('search-count');
         const searchList = document.getElementById('search-list');
 
-        searchCount.textContent = `Found ${results.length} tracker${results.length !== 1 ? 's' : ''}!`;
+        const found = (typeof total === 'number') ? total : results.length;
+        searchCount.textContent = truncated
+            ? `Found ${found} trackers - showing the newest ${results.length}. Refine your search to narrow it down.`
+            : `Found ${found} tracker${found !== 1 ? 's' : ''}!`;
         searchResults.classList.remove('hidden');
 
         if (results.length === 0) {
@@ -1042,6 +905,10 @@
     let reassignmentRequests = [];
 
     async function loadReassignmentRequests() {
+        // Transfer requests are addressed to an individual NS operator; the endpoint
+        // serves NOC_SUPPORT only. Calling it as NOC_SUPPORT_GROUP returned a 403 on
+        // every load, reconcile and socket event.
+        if ('{{ session.role }}' !== 'NOC_SUPPORT') return;
         try {
             const response = await fetch('/api/trackers/reassignment-requests');
             const data = await response.json();

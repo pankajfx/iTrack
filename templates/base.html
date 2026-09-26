@@ -871,6 +871,29 @@
     <!-- Socket.IO for real-time updates -->
     <script src="/static/js/vendor/socket.io.min.js"></script>
     <script>
+        // Capture policy comes from the server (MEDIA_PROFILE) so fidelity can be
+        // dialled up or down without touching the templates. See PROJECT_GUIDE §15.
+        window.MEDIA_CONFIG = {
+            profile:        '{{ config.MEDIA_PROFILE }}',
+            captureMaxDim:  {{ config.CAPTURE_MAX_DIM }},
+            captureQuality: {{ config.CAPTURE_QUALITY }}
+        };
+
+        // Camera constraints derived from the policy above. Note getUserMedia
+        // samples a video stream, so this can never match the phone's native
+        // still-camera resolution however high it is set.
+        window.cameraConstraints = function () {
+            var d = (window.MEDIA_CONFIG && window.MEDIA_CONFIG.captureMaxDim) || 1920;
+            return { video: { facingMode: 'environment',
+                              width:  { ideal: d },
+                              height: { ideal: Math.round(d * 9 / 16) } } };
+        };
+
+        window.captureQuality = function () {
+            var q = window.MEDIA_CONFIG && window.MEDIA_CONFIG.captureQuality;
+            return (typeof q === 'number' && q > 0 && q <= 1) ? q : 0.95;
+        };
+
         window.REALTIME_CONFIG = {
             mode: '{{ config.REALTIME_MODE }}',
             socketTimeout: {{ config.SOCKET_TIMEOUT }},

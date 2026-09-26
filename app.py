@@ -56,6 +56,52 @@ REALTIME_MODE = os.environ.get('REALTIME_MODE', 'hybrid')  # 'socket', 'api', 'h
 SOCKET_TIMEOUT = int(os.environ.get('SOCKET_TIMEOUT', '2000'))  # milliseconds
 SOCKET_INCLUDE_FULL_DATA = os.environ.get('SOCKET_INCLUDE_FULL_DATA', 'true').lower() == 'true'
 
+# ─── Media pipeline configuration ────────────────────────────────────────────
+# Photos and voice notes are stored as base64 data URLs INSIDE documents, so every
+# byte is paid three times over: once in Mongo, once in every API response that
+# carries the document, and once in the client's memory. These knobs trade fidelity
+# against that cost without a code change.
+#
+#   MEDIA_PROFILE   compact | balanced (default) | original
+#   IMAGE_MAX_DIM   longest edge in px for server-side resize; 0 = never resize
+#   IMAGE_QUALITY   JPEG quality 1-100 for the server-side re-encode
+#   CAPTURE_MAX_DIM / CAPTURE_QUALITY   handed to the browser camera (see
+#                   window.MEDIA_CONFIG) so in-app captures follow the same policy
+#
+# A note on "original": getUserMedia samples a VIDEO stream, so an in-app capture
+# can never reach the resolution of the phone's native still camera regardless of
+# this setting - see PROJECT_GUIDE.md section 15.
+MEDIA_PROFILES = {
+    'compact':  {'image_max_dim': 1280, 'image_quality': 82,
+                 'capture_max_dim': 1280, 'capture_quality': 0.82},
+    'balanced': {'image_max_dim': 1920, 'image_quality': 95,
+                 'capture_max_dim': 1920, 'capture_quality': 0.95},
+    'original': {'image_max_dim': 0,    'image_quality': 98,
+                 'capture_max_dim': 4096, 'capture_quality': 0.98},
+}
+MEDIA_PROFILE = os.environ.get('MEDIA_PROFILE', 'balanced').lower()
+if MEDIA_PROFILE not in MEDIA_PROFILES:
+    MEDIA_PROFILE = 'balanced'
+_mp = MEDIA_PROFILES[MEDIA_PROFILE]
+
+def _env_int(name, default):
+    try:
+        return int(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+def _env_float(name, default):
+    try:
+        return float(os.environ[name])
+    except (KeyError, ValueError):
+        return default
+
+IMAGE_MAX_DIM   = _env_int('IMAGE_MAX_DIM',   _mp['image_max_dim'])
+IMAGE_QUALITY   = _env_int('IMAGE_QUALITY',   _mp['image_quality'])
+CAPTURE_MAX_DIM = _env_int('CAPTURE_MAX_DIM', _mp['capture_max_dim'])
+CAPTURE_QUALITY = _env_float('CAPTURE_QUALITY', _mp['capture_quality'])
+
+
 # ─── Tracker status constants ────────────────────────────────────────────────
 # Canonical status strings used across backend, frontend, and analytics.
 STATUS_WAITING_NOC       = 'waiting_noc_assignment'
@@ -103,7 +149,10 @@ def inject_config():
         'config': {
             'REALTIME_MODE': REALTIME_MODE,
             'SOCKET_TIMEOUT': SOCKET_TIMEOUT,
-            'SOCKET_INCLUDE_FULL_DATA': SOCKET_INCLUDE_FULL_DATA
+            'SOCKET_INCLUDE_FULL_DATA': SOCKET_INCLUDE_FULL_DATA,
+            'MEDIA_PROFILE': MEDIA_PROFILE,
+            'CAPTURE_MAX_DIM': CAPTURE_MAX_DIM,
+            'CAPTURE_QUALITY': CAPTURE_QUALITY,
         }
     }
 
@@ -2432,15 +2481,14 @@ def api_upload_chat_file(tracker_id):
                     img = img.convert('RGBA')
                 bg.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
                 img = bg
-            # Keep enough detail that a downloaded chat photo is still readable
-            # (serial numbers, LED labels, GPS stamps). Only oversize phone shots
-            # get scaled, and the JPEG re-encode stays visually lossless.
-            max_size = 1920
-            if max(img.size) > max_size:
-                ratio = max_size / max(img.size)
+            # Governed by MEDIA_PROFILE / IMAGE_MAX_DIM / IMAGE_QUALITY so the
+            # fidelity-vs-bandwidth trade can be changed without a deploy.
+            # IMAGE_MAX_DIM = 0 keeps the original dimensions.
+            if IMAGE_MAX_DIM and max(img.size) > IMAGE_MAX_DIM:
+                ratio = IMAGE_MAX_DIM / max(img.size)
                 img = img.resize(tuple(int(d * ratio) for d in img.size), Image.Resampling.LANCZOS)
             out = BytesIO()
-            img.save(out, format='JPEG', quality=95, optimize=True)
+            img.save(out, format='JPEG', quality=IMAGE_QUALITY, optimize=True)
             file_data = out.getvalue()
             mime_type = 'image/jpeg'
         except ImportError:

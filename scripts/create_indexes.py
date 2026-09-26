@@ -18,18 +18,18 @@ from dotenv import load_dotenv
 # Load environment variables from the project-root .env (parent of scripts/).
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-# ─── Config ──────────────────────────────────────────────────────────────────
+# ─── Config --------------------------------------------------────────────────
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27017/sdwan_tracker")
 DB_NAME   = MONGO_URI.rstrip("/").rsplit("/", 1)[-1].split("?")[0]
 
-# ─── Index definitions ────────────────────────────────────────────────────────
+# ─── Index definitions --------------------------------------------------──────
 # Format: (collection_name, key_list, options_dict, description)
 #
 # Key list uses pymongo tuples: [("field", ASCENDING), ...]
 # ASCENDING = 1, DESCENDING = -1
 #
 # Design rationale per collection is documented inline.
-# ─────────────────────────────────────────────────────────────────────────────
+# --------------------------------------------------───────────────────────────
 
 INDEXES = [
 
@@ -47,7 +47,7 @@ INDEXES = [
     ),
 
     # FE dashboard: each FE sees their own trackers sorted newest-first.
-    # Compound (fe.id, created_at DESC) → index-only sort, no in-memory sort.
+    # Compound (fe.id, created_at DESC) -> index-only sort, no in-memory sort.
     (
         "trackers",
         [("fe.id", ASCENDING), ("created_at", DESCENDING)],
@@ -217,7 +217,7 @@ INDEXES = [
 
 ]
 
-# ─── Runner ──────────────────────────────────────────────────────────────────
+# ─── Runner --------------------------------------------------────────────────
 
 def get_existing_index_names(collection):
     """Return a set of existing index names on a collection."""
@@ -253,7 +253,7 @@ def create_indexes(db):
                 print(f"          {description}")
                 stats["created"] += 1
             except OperationFailure as exc:
-                print(f"  FAIL    {index_name} — {exc}")
+                print(f"  FAIL    {index_name} - {exc}")
                 stats["failed"] += 1
 
     return stats
@@ -274,7 +274,7 @@ def main():
     db    = client[DB_NAME]
     stats = create_indexes(db)
 
-    print(f"\n{'─' * 50}")
+    print(f"\n{'-' * 50}")
     print(f"Done. Created: {stats['created']}  Skipped: {stats['skipped']}  Failed: {stats['failed']}")
     client.close()
 

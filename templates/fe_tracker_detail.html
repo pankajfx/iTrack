@@ -1082,7 +1082,7 @@ function svOpenCamera(slot) {
     const labels = { 1: 'Booster', 2: 'SDWAN Router', 3: 'Site Photo' };
     document.getElementById('sv-camera-title').textContent = `Capture ${labels[slot]} Photo`;
     document.getElementById('sv-camera-modal').classList.remove('hidden');
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
+    navigator.mediaDevices.getUserMedia(window.cameraConstraints())
         .then(s => { svStream = s; document.getElementById('sv-camera-video').srcObject = s; })
         .catch(() => { showToast('Camera access denied', 'error'); svCloseCamera(); });
 }
@@ -1114,7 +1114,7 @@ function svTakePicture() {
     ctx.fillStyle = svGpsPosition ? '#00FF88' : '#FF6666';
     lines.forEach((line, i) => ctx.fillText(line, 2 + pad, by + pad + (i + 1) * lh - Math.floor(lh * 0.2)));
 
-    const imageData = canvas.toDataURL('image/jpeg', 0.95);
+    const imageData = canvas.toDataURL('image/jpeg', window.captureQuality());
     const gpsSnap = svGpsPosition ? { lat: svGpsPosition.latitude, lng: svGpsPosition.longitude, address: svGpsAddress || null } : null;
     svPhotos[svCurrentSlot] = { type: svTypes[svCurrentSlot], data: imageData, gps: gpsSnap, captured_at: new Date().toISOString() };
     svCloseCamera();

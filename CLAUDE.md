@@ -170,7 +170,17 @@ SECRET_KEY=your-strong-secret-key
 ADMIN_PASSWORD=change-me           # /admin panel; default 'qwerty' — set in prod
 REALTIME_MODE=hybrid               # 'socket' | 'api' | 'hybrid'
 PORT=5001                          # default listen port
+
+MEDIA_PROFILE=balanced             # compact | balanced | original  (see PROJECT_GUIDE §15.4)
+IMAGE_MAX_DIM=1920                 # server-side resize, longest edge; 0 = never resize
+IMAGE_QUALITY=95                   # server-side JPEG quality
+CAPTURE_MAX_DIM=1920               # camera width requested in the browser
+CAPTURE_QUALITY=0.95               # canvas JPEG quality in the browser
 ```
+
+> **Performance work:** read [`PROJECT_GUIDE.md` §15](PROJECT_GUIDE.md) first — it holds the measured
+> baseline, the ranked root causes and the ordered remediation plan. Re-measure and update it in the same
+> change; do not start a second performance document.
 
 Default dev server: `http://localhost:5001` (override with `PORT`)
 

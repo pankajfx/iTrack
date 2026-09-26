@@ -713,10 +713,7 @@
             capturedImageData = null;
             
             // Request camera access
-            cameraStream = await navigator.mediaDevices.getUserMedia({
-                // Back camera on mobile, at the highest resolution the device offers
-                video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
-            });
+            cameraStream = await navigator.mediaDevices.getUserMedia(window.cameraConstraints());
             
             video.srcObject = cameraStream;
             modal.classList.remove('hidden');
@@ -749,7 +746,7 @@
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         
         // Convert to data URL
-        capturedImageData = canvas.toDataURL('image/jpeg', 0.95);
+        capturedImageData = canvas.toDataURL('image/jpeg', window.captureQuality());
         
         console.log('Photo captured:', {
             dataUrlLength: capturedImageData ? capturedImageData.length : 0,

@@ -332,7 +332,9 @@ def main():
     if 'users' not in db.list_collection_names():
         db.create_collection('users')
         print("  Created 'users' collection")
-    db.users.create_index('username', unique=True)
+    # Same name create_indexes.py uses - an unnamed create_index() here would
+    # take the default name 'username_1' and then collide with it (IndexOptionsConflict).
+    db.users.create_index('username', unique=True, name='users_username_unique')
 
     print("\nClearing existing users...")
     deleted = db.users.delete_many({}).deleted_count

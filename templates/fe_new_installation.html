@@ -556,7 +556,7 @@ function openCamera(title) {
     document.getElementById('camera-modal-title').textContent = title;
     document.getElementById('camera-modal').classList.remove('hidden');
     updateCameraGPSOverlay();
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } })
+    navigator.mediaDevices.getUserMedia(window.cameraConstraints())
         .then(stream => {
             currentStream = stream;
             document.getElementById('camera-video').srcObject = stream;
@@ -596,7 +596,7 @@ function takePicture() {
     ctx.drawImage(video, 0, 0);
     drawWatermark(canvas, ctx);
 
-    const imageData = canvas.toDataURL('image/jpeg', 0.95);
+    const imageData = canvas.toDataURL('image/jpeg', window.captureQuality());
     const gpsSnap = gpsPosition
         ? { lat: gpsPosition.latitude, lng: gpsPosition.longitude, address: gpsAddress || null }
         : null;

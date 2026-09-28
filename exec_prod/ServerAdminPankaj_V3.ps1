@@ -493,6 +493,20 @@ function Reload-Nginx {
   else { Write-Warning "nginx -t reported errors; not reloading." }
 }
 
+# Rewrite nginx.conf from the template above, keeping a timestamped backup.
+# Consoles before 2026-09-28 only wrote it when none existed, so an existing
+# install still has a config with no WebSocket upgrade and nginx's 1 MB upload limit.
+function Reset-NginxConfig {
+  if (Test-Path $Cfg.NginxConf) {
+    $backup = "$($Cfg.NginxConf).$(Get-Date -Format 'yyyyMMdd_HHmmss').bak"
+    Copy-Item -Path $Cfg.NginxConf -Destination $backup
+    Write-Host "Backed up the old config to $backup."
+  }
+  New-NginxConfig
+  if (Get-Process -Name nginx -ErrorAction SilentlyContinue) { Reload-Nginx }
+  else { Write-Host "Nginx is not running; the new config applies when it starts." }
+}
+
 # Optional Windows Service for Nginx via NSSM
 function Install-NginxService {
   if (-not (Test-Path $Cfg.NssmExe)) { Write-Warning "NSSM not found."; return }
@@ -538,6 +552,7 @@ while ($running) {
   Write-Host " --- OR Nginx ---"
   Write-Host " N) Setup/Start Nginx      O) Stop Nginx      P) Reload Nginx"
   Write-Host " Q) Install Nginx Service  R) Remove Nginx Service"
+  Write-Host " U) Rewrite Nginx config from the current template (backup + reload)"
   Write-Host " --- App as a Windows service (production) ---"
   Write-Host " S) Install App Service (gevent)  T) Remove App Service"
   Write-Host " 0) Exit`n"
@@ -560,6 +575,7 @@ while ($running) {
     'N' { if (-not (Test-Path $Cfg.NginxConf)) { New-NginxConfig }; Start-Nginx; Pause }
     'O' { Stop-Nginx; Pause }
     'P' { Reload-Nginx; Pause }
+    'U' { Reset-NginxConfig; Pause }
     'Q' { Install-NginxService; Pause }
     'R' { Uninstall-NginxService; Pause }
     'S' { Install-AppService; Pause }

@@ -1,8 +1,12 @@
 <# =======================================================================
-   ITracker Control Console (Waitress + MongoDB + Reverse Proxy)
-   - Runs waitress detached so closing the console won't stop the server
-   - Optional: install/uninstall Windows services via NSSM if available
+   ITracker Control Console (App + MongoDB + Reverse Proxy)
+   - The app server is `python app.py` in gevent mode: one process serves HTTP
+     and WebSocket (Socket.IO). Waitress is not used - it cannot carry WebSockets.
+   - Production: install the app as a Windows service via NSSM (option S) -
+     starts at boot, restarts on exit, rotating logs in LogDir.
+   - Without a service, A/B/C run it detached (closing the console won't stop it).
    - Reverse proxy: prefers Caddy (auto/local HTTPS), or Nginx fallback
+   Full deployment guide: PROJECT_GUIDE.md section 9.
    Author: You + Copilot
    ======================================================================= #>
 
@@ -11,11 +15,12 @@ $Cfg = [ordered]@{
   AppName           = 'ITracker'
   AppRoot           = 'G:\srv\app\itracker'               # contains app.py/package
   VenvPython        = 'G:\srv\app\itracker\venv\Scripts\python.exe'
-  WsgiObject        = 'app:app'                           # e.g., 'app:app' or use --call factory
   Port              = 5001
-  Threads           = 8
-  UrlScheme         = 'https'                             # app thinks HTTPS behind proxy
-  PIDFile           = 'G:\srv\app\itracker\itracker_waitress.pid'
+  # gevent is the production server. 'threading' is the development server and
+  # refuses to run without a console, so it can never be a service.
+  AsyncMode         = 'gevent'
+  LogDir            = 'G:\srv\app\itracker\logs'          # service stdout/stderr, rotated at 10 MB
+  PIDFile           = 'G:\srv\app\itracker\itracker_app.pid'
 
   # MongoDB Windows service name
   MongoService      = 'MongoDB'
@@ -44,8 +49,6 @@ $Cfg = [ordered]@{
   # Optional: NSSM to install Windows services (set to full path if you have it)
   NssmExe           = 'C:\Tools\NSSM\nssm.exe'
 }
-
-$Cfg.WaitressExe = Join-Path (Split-Path $Cfg.VenvPython -Parent) 'waitress-serve.exe'
 
 # -------------------- Utility helpers --------------------
 function Test-Admin {
@@ -120,10 +123,54 @@ function Detach-Run {
 # Pause helper for PS7 (no built-in Pause)
 function Pause { Read-Host 'Press ENTER to continue...' }
 
-# -------------------- Waitress (Flask) --------------------
+# -------------------- App (python app.py on gevent) --------------------
+function Get-AppService { Get-Service -Name $Cfg.AppName -ErrorAction SilentlyContinue }
+
+# gevent + gevent-websocket are the production server; without them app.py cannot
+# start in gevent mode. Checked before every start so the failure is explained.
+function Test-AppDeps {
+  if ($Cfg.AsyncMode -ne 'gevent') { return $true }
+  & $Cfg.VenvPython -c "import gevent, geventwebsocket" 2>$null
+  if ($LASTEXITCODE -eq 0) { return $true }
+  Write-Warning "gevent / gevent-websocket are missing from $($Cfg.VenvPython). Install the app's requirements, e.g. offline:"
+  Write-Warning "  & '$($Cfg.VenvPython)' -m pip install --no-index --find-links <wheels folder> -r '$(Join-Path $Cfg.AppRoot 'Requirements.txt')'"
+  return $false
+}
+
+# An 'ITracker' service installed by older versions of this console ran waitress.
+function Test-LegacyWaitressService {
+  if (-not (Get-AppService) -or -not (Test-Path $Cfg.NssmExe)) { return $false }
+  $appExe = ((& $Cfg.NssmExe get $Cfg.AppName Application 2>$null) -join '') -replace "`0", ''
+  if ($appExe -match 'waitress') {
+    Write-Warning "Service '$($Cfg.AppName)' runs waitress, which cannot carry WebSockets (live updates fail). Remove it (T), then install the app service (S)."
+    return $true
+  }
+  return $false
+}
+
+function Wait-AppListening([int]$Seconds = 30) {
+  $deadline = (Get-Date).AddSeconds($Seconds)
+  do {
+    $info = Get-ListenerInfo -Port $Cfg.Port
+    if ($info.Listening) { return $info }
+    Start-Sleep -Milliseconds 500
+  } while ((Get-Date) -lt $deadline)
+  return $null
+}
+
+# /healthz: 200 when the app is up and MongoDB answers, 503 when the database does not.
+function Get-AppHealth {
+  try {
+    $r = Invoke-WebRequest -Uri "http://127.0.0.1:$($Cfg.Port)/healthz" -UseBasicParsing -TimeoutSec 5
+    "$($r.StatusCode) $($r.Content)"
+  } catch { "FAILED ($($_.Exception.Message))" }
+}
+
 function Get-FlaskStatus {
+  $svc = Get-AppService
+  $how = if ($svc) { "service $($svc.Status)" } else { 'no service' }
   $info = Get-ListenerInfo -Port $Cfg.Port
-  if ($info.Listening) { "RUNNING (port $($Cfg.Port), PID $($info.PID), $($info.ProcessName)) [socketio.run]" } else { "STOPPED" }
+  if ($info.Listening) { "RUNNING (port $($Cfg.Port), PID $($info.PID), $($info.ProcessName)) [$how]" } else { "STOPPED [$how]" }
 }
 
 function Start-Flask {
@@ -131,29 +178,49 @@ function Start-Flask {
     Write-Warning "Python not found at $($Cfg.VenvPython)."
     return
   }
+  # Installed as a service: the service manager owns the process (killing or
+  # double-starting it here would fight NSSM's restart policy).
+  $svc = Get-AppService
+  if ($svc) {
+    Test-LegacyWaitressService | Out-Null
+    if ($svc.Status -ne 'Running') { Start-Service -Name $Cfg.AppName }
+    $post = Wait-AppListening
+    if ($post) { Write-Host "Service '$($Cfg.AppName)' is serving on port $($Cfg.Port) (PID $($post.PID)). Health: $(Get-AppHealth)" }
+    else { Write-Error "Service '$($Cfg.AppName)' did not open port $($Cfg.Port). See $(Join-Path $Cfg.LogDir 'itracker.err.log')." }
+    return
+  }
   $info = Get-ListenerInfo -Port $Cfg.Port
   if ($info.Listening) { Write-Host "App already listening on $($Cfg.Port) (PID $($info.PID))." -ForegroundColor Yellow; return }
+  if (-not (Test-AppDeps)) { return }
 
   Push-Location $Cfg.AppRoot
   try {
-    # NOTE: Waitress cannot handle WebSocket upgrades (WSGI-only).
-    # Flask-SocketIO requires socketio.run() or an async server (eventlet/gevent).
-    # We launch app.py directly — socketio.run() uses simple-websocket for WS support.
+    # python app.py is the server: in gevent mode socketio.run() serves HTTP and
+    # WebSocket on one event loop. Process environment beats .env for these keys.
     $env:PORT = $Cfg.Port
+    $env:SOCKETIO_ASYNC_MODE = $Cfg.AsyncMode
     Detach-Run -FilePath $Cfg.VenvPython -ArgumentList @('app.py') -WorkingDirectory $Cfg.AppRoot
-    Start-Sleep 2
-    $post = Get-ListenerInfo -Port $Cfg.Port
-    if ($post.Listening) {
+    $post = Wait-AppListening
+    if ($post) {
       $post.PID | Out-File -FilePath $Cfg.PIDFile -Encoding ascii -Force
-      Write-Host "Started Flask/SocketIO on port $($Cfg.Port) (PID $($post.PID))."
+      Write-Host "Started the app ($($Cfg.AsyncMode)) on port $($Cfg.Port) (PID $($post.PID)). Health: $(Get-AppHealth)"
     } else {
-      Write-Error "App failed to bind to :$($Cfg.Port). Check app.py and venv dependencies."
+      Write-Error "App failed to bind to :$($Cfg.Port). Run it in the foreground to see why:  cd '$($Cfg.AppRoot)'; & '$($Cfg.VenvPython)' app.py"
     }
   } finally { Pop-Location }
 }
 
 function Stop-Flask {
   $killed = $false
+
+  # 0) A service is stopped through the service manager - killing its process
+  #    would only make NSSM start it again.
+  $svc = Get-AppService
+  if ($svc -and $svc.Status -ne 'Stopped') {
+    Stop-Service -Name $Cfg.AppName -ErrorAction SilentlyContinue
+    Write-Host "Stopped service '$($Cfg.AppName)'."
+    $killed = $true
+  }
 
   # 1) Try PID file first
   if (Test-Path $Cfg.PIDFile) {
@@ -171,7 +238,7 @@ function Stop-Flask {
     Remove-Item $Cfg.PIDFile -Force -ErrorAction SilentlyContinue
   }
 
-  # 2) Always sweep port after — handles stale PID file and dual IPv4/IPv6 listeners
+  # 2) Always sweep port after - handles stale PID file and dual IPv4/IPv6 listeners
   if ($killed) { Start-Sleep 1 }
   $listeners = Get-NetTCPConnection -LocalPort $Cfg.Port -State Listen -ErrorAction SilentlyContinue
   if ($listeners) {
@@ -204,18 +271,49 @@ function Stop-Flask {
 
 function Restart-Flask { Stop-Flask; Start-Sleep 2; Start-Flask }
 
-# Optional: install waitress as a Windows service (via NSSM)
-function Install-WaitressService {
+# Production: the app as a Windows service (via NSSM). Starts at boot - after
+# MongoDB when that is a local service - restarts 5 s after any exit, and writes
+# stdout/stderr to LogDir, rotated at 10 MB. Everything else comes from
+# AppRoot\.env; the service pins SOCKETIO_ASYNC_MODE and PORT from $Cfg.
+function Install-AppService {
   if (-not (Test-Path $Cfg.NssmExe)) { Write-Warning "NSSM not found at $($Cfg.NssmExe)"; return }
-  $nssmArgs = @("install",$Cfg.AppName,$Cfg.WaitressExe,"--listen=*:$($Cfg.Port)","--threads=$($Cfg.Threads)","--ident=$($Cfg.AppName)","--url-scheme=$($Cfg.UrlScheme)",$Cfg.WsgiObject)
-  & $Cfg.NssmExe @nssmArgs
-  & $Cfg.NssmExe set $Cfg.AppName AppDirectory $Cfg.AppRoot
-  & $Cfg.NssmExe set $Cfg.AppName Start SERVICE_AUTO_START
-  & $Cfg.NssmExe start $Cfg.AppName
-  Write-Host "Installed/started Windows service '$($Cfg.AppName)' for waitress."
+  if (-not (Test-Path $Cfg.VenvPython)) { Write-Warning "Python not found at $($Cfg.VenvPython)."; return }
+  if ($Cfg.AsyncMode -ne 'gevent') {
+    Write-Warning "AsyncMode must be 'gevent' for a service: the threading development server refuses to run without a console."
+    return
+  }
+  if (-not (Test-AppDeps)) { return }
+  if (Get-AppService) {
+    Test-LegacyWaitressService | Out-Null
+    Write-Warning "Service '$($Cfg.AppName)' already exists. Remove it first (T) to reinstall."
+    return
+  }
+  $info = Get-ListenerInfo -Port $Cfg.Port
+  if ($info.Listening) { Write-Warning "Port $($Cfg.Port) is in use (PID $($info.PID)). Stop the running app first (B)."; return }
+
+  New-Item -ItemType Directory -Path $Cfg.LogDir -Force | Out-Null
+  $n = $Cfg.NssmExe; $s = $Cfg.AppName
+  & $n install $s $Cfg.VenvPython app.py
+  & $n set $s AppDirectory $Cfg.AppRoot
+  & $n set $s AppEnvironmentExtra "SOCKETIO_ASYNC_MODE=$($Cfg.AsyncMode)" "PORT=$($Cfg.Port)" 'PYTHONUNBUFFERED=1' 'PYTHONIOENCODING=utf-8'
+  & $n set $s AppStdout (Join-Path $Cfg.LogDir 'itracker.out.log')
+  & $n set $s AppStderr (Join-Path $Cfg.LogDir 'itracker.err.log')
+  & $n set $s AppRotateFiles 1
+  & $n set $s AppRotateOnline 1
+  & $n set $s AppRotateBytes 10485760
+  & $n set $s AppExit Default Restart
+  & $n set $s AppRestartDelay 5000
+  & $n set $s Start SERVICE_AUTO_START
+  if (Get-Service -Name $Cfg.MongoService -ErrorAction SilentlyContinue) {
+    & $n set $s DependOnService $Cfg.MongoService
+  }
+  & $n start $s
+  $post = Wait-AppListening
+  if ($post) { Write-Host "Installed/started service '$s' ($($Cfg.AsyncMode)) on port $($Cfg.Port). Health: $(Get-AppHealth)" }
+  else { Write-Warning "Service '$s' installed but port $($Cfg.Port) is not open yet. See $(Join-Path $Cfg.LogDir 'itracker.err.log')." }
 }
 
-function Uninstall-WaitressService {
+function Uninstall-AppService {
   if (-not (Test-Path $Cfg.NssmExe)) { Write-Warning "NSSM not found at $($Cfg.NssmExe)"; return }
   & $Cfg.NssmExe stop  $Cfg.AppName
   & $Cfg.NssmExe remove $Cfg.AppName confirm
@@ -246,11 +344,19 @@ function New-Caddyfile {
   $lines = @(
     '# Caddyfile generated by ITracker console'
     '# Local HTTPS today (internal CA). Later, replace ''localhost'' with your real domain.'
+    '# Caddy passes the Socket.IO WebSocket upgrade through and sends'
+    '# X-Forwarded-For/-Proto itself: set TRUST_PROXY_HOPS=1 in the app''s .env.'
     'localhost {'
     '    tls internal'
     '    encode gzip'
     "    reverse_proxy 127.0.0.1:$($Cfg.Port)"
     '}'
+    '# More than one app instance (each needs SOCKETIO_MESSAGE_QUEUE): a Socket.IO'
+    '# session lives in one process, so every client must stay on one instance:'
+    "#     reverse_proxy 127.0.0.1:$($Cfg.Port) 127.0.0.1:$($Cfg.Port + 1) {"
+    '#         lb_policy cookie'
+    '#         health_uri /healthz'
+    '#     }'
     '# Example for future public domain (uncomment/replace when DNS is ready)'
     '# itracker.example.com {'
     "#     reverse_proxy 127.0.0.1:$($Cfg.Port)"
@@ -322,6 +428,9 @@ function New-NginxConfig {
 
   $lines = @(
     '# nginx.conf generated by ITracker console'
+    '# nginx on Windows runs one worker with at most 1024 connections, and every live'
+    '# socket holds two (browser side + app side): about 500 concurrent users.'
+    '# Caddy has no such limit - prefer it on Windows. Set TRUST_PROXY_HOPS=1 in .env.'
     'worker_processes  1;'
     ''
     'events { worker_connections  1024; }'
@@ -331,6 +440,20 @@ function New-NginxConfig {
     '    default_type  application/octet-stream;'
     '    sendfile      on;'
     ''
+    '    # Socket.IO upgrades its connection to WebSocket: pass the handshake through.'
+    '    map $http_upgrade $connection_upgrade {'
+    '        default upgrade;'
+    "        ''      close;"
+    '    }'
+    ''
+    '    upstream itracker_app {'
+    "        server 127.0.0.1:$($Cfg.Port);"
+    '        # More app instances (each needs SOCKETIO_MESSAGE_QUEUE): add them here and'
+    '        # enable ip_hash - a Socket.IO session lives in one process.'
+    '        # ip_hash;'
+    "        # server 127.0.0.1:$($Cfg.Port + 1);"
+    '    }'
+    ''
     '    server {'
     '        listen              443 ssl;'
     '        server_name         localhost;'
@@ -338,12 +461,31 @@ function New-NginxConfig {
     "        ssl_certificate     $($Cfg.NginxCertPath -replace '\\','/');"
     "        ssl_certificate_key $($Cfg.NginxKeyPath -replace '\\','/');"
     ''
+    '        client_max_body_size 20m;             # the app caps uploads at 16 MB'
+    ''
     '        location / {'
-    "            proxy_pass         http://127.0.0.1:$($Cfg.Port);"
+    '            proxy_pass         http://itracker_app;'
+    '            proxy_http_version 1.1;'
     '            proxy_set_header   Host $host;'
     '            proxy_set_header   X-Real-IP $remote_addr;'
     '            proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;'
     '            proxy_set_header   X-Forwarded-Proto https;'
+    '        }'
+    ''
+    '        location /socket.io/ {'
+    '            proxy_pass         http://itracker_app;'
+    '            proxy_http_version 1.1;'
+    '            proxy_buffering    off;'
+    '            proxy_set_header   Host $host;'
+    '            proxy_set_header   X-Real-IP $remote_addr;'
+    '            proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;'
+    '            proxy_set_header   X-Forwarded-Proto https;'
+    '            proxy_set_header   Upgrade $http_upgrade;'
+    '            proxy_set_header   Connection $connection_upgrade;'
+    '            # Well above the Socket.IO heartbeat (a ping every 25 s), so nginx'
+    '            # never cuts a healthy idle socket.'
+    '            proxy_read_timeout 120s;'
+    '            proxy_send_timeout 120s;'
     '        }'
     '    }'
     ''
@@ -408,13 +550,13 @@ while ($running) {
   $nginx = if (Test-NginxPresent) { Get-NginxStatus } else { "Not Installed/Not Found" }
 
   Write-Host "================ ITracker Control Console ==================="
-  Write-Host (" Flask/Waitress (port {0}): {1}" -f $Cfg.Port, $flask)
+  Write-Host (" App (port {0}): {1}" -f $Cfg.Port, $flask)
   Write-Host (" MongoDB Service '{0}': {1}" -f $Cfg.MongoService, $mongo)
   Write-Host (" Caddy:  {0}" -f $caddy)
   Write-Host (" Nginx:  {0}" -f $nginx)
   Write-Host "=============================================================`n"
 
-  Write-Host " A) Start Flask    B) Stop Flask    C) Restart Flask"
+  Write-Host " A) Start App      B) Stop App      C) Restart App"
   Write-Host " D) Start Mongo    E) Stop Mongo    F) Restart Mongo"
   Write-Host " G) Launch mongosh"
   Write-Host " --- Reverse Proxy (Caddy preferred) ---"
@@ -423,7 +565,8 @@ while ($running) {
   Write-Host " --- OR Nginx ---"
   Write-Host " N) Setup/Start Nginx      O) Stop Nginx      P) Reload Nginx"
   Write-Host " Q) Install Nginx Service  R) Remove Nginx Service"
-  Write-Host " S) Install Waitress Service  T) Remove Waitress Service"
+  Write-Host " --- App as a Windows service (production) ---"
+  Write-Host " S) Install App Service (gevent)  T) Remove App Service"
   Write-Host " 0) Exit`n"
   $choice = (Read-Host "Choose").Trim().ToUpperInvariant()
 
@@ -446,8 +589,8 @@ while ($running) {
     'P' { Reload-Nginx; Pause }
     'Q' { Install-NginxService; Pause }
     'R' { Uninstall-NginxService; Pause }
-    'S' { Install-WaitressService; Pause }
-    'T' { Uninstall-WaitressService; Pause }
+    'S' { Install-AppService; Pause }
+    'T' { Uninstall-AppService; Pause }
     '0' { $running = $false; continue }
     default { }
   }

@@ -4,6 +4,7 @@ from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.security import check_password_hash, generate_password_hash
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
+from bson.errors import InvalidId
 from pymongo import ReturnDocument
 import gridfs
 import base64
@@ -351,6 +352,11 @@ def make_event(stage, actor_id, actor_role, remarks, metadata=None):
     }
 
 
+@app.errorhandler(InvalidId)
+def handle_invalid_object_id(_e):
+    return jsonify({'error': 'Not found'}), 404
+
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
@@ -375,6 +381,12 @@ def api_get_media(file_id):
     try:
         f = _gridfs().get(oid)
     except gridfs.NoFile:
+        return jsonify({'error': 'Not found'}), 404
+
+    # Media is only as visible as the tracker it belongs to. A file with no
+    # recorded owner is refused rather than guessed at (fail closed).
+    owner = (f.metadata or {}).get('tracker_id')
+    if not owner or visible_tracker(owner, {'_id': 1}) is None:
         return jsonify({'error': 'Not found'}), 404
 
     # Re-checked at serve time as well, so media stored before the write-side
@@ -464,7 +476,7 @@ def fe_new_installation():
 def fe_tracker_detail(tracker_id):
     if session.get('role') not in FE_ROLES:
         return redirect(url_for('index'))
-    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    tracker = visible_tracker(tracker_id, {'fe': 1})
     if not tracker:
         flash('Tracker not found', 'error')
         return redirect(url_for('fe_dashboard'))
@@ -489,6 +501,8 @@ def noc_dashboard():
 def noc_tracker_detail(tracker_id):
     if session.get('role') not in NOC_ROLES:
         return redirect(url_for('index'))
+    if visible_tracker(tracker_id, {'_id': 1}) is None:
+        return redirect(url_for('noc_dashboard'))
     return render_template('noc_tracker_detail.html',
                            tracker_id=tracker_id,
                            theme=get_theme_for_role(session.get('role')))
@@ -686,10 +700,16 @@ def api_debug_time():
 @app.route('/api/trackers/check/<sdwan_id>')
 @login_required
 def api_check_sdwan_id(sdwan_id):
-    tracker = mongo.db.trackers.find_one({'sdwan_id': sdwan_id})
-    if tracker:
-        return jsonify({'exists': True, 'tracker': serialize_doc(tracker)})
-    return jsonify({'exists': False})
+    """Is this SDWAN ID taken? It used to return the ENTIRE tracker to any
+    logged-in user; SDWAN IDs are easy to enumerate. The id is included only
+    when the caller may open that tracker."""
+    tracker = mongo.db.trackers.find_one({'sdwan_id': sdwan_id}, {'_id': 1})
+    if not tracker:
+        return jsonify({'exists': False})
+    out = {'exists': True}
+    if visible_tracker(tracker['_id'], {'_id': 1}):
+        out['tracker_id'] = str(tracker['_id'])
+    return jsonify(out)
 
 
 def resolve_tracker_media(tracker):
@@ -719,7 +739,7 @@ def resolve_tracker_media(tracker):
 @app.route('/api/trackers/<tracker_id>')
 @login_required
 def api_get_tracker(tracker_id):
-    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    tracker = visible_tracker(tracker_id)
     if not tracker:
         return jsonify({'error': 'Tracker not found'}), 404
 
@@ -853,6 +873,71 @@ def dashboard_scope():
     if dashboard_side() == 'noc':
         return {}
     return fe_visibility_query()
+
+
+# ─── Per-tracker authorization ───────────────────────────────────────────────
+# Every read of a single tracker - the detail API and pages, its chat, its media -
+# goes through visible_tracker(), which applies the SAME scope as the caller's
+# dashboard. Before this, any logged-in user could read any tracker, its chat and
+# its photos just by knowing or guessing an id.
+def visibility_scope():
+    """Trackers the current user may READ: their dashboard scope, plus the
+    org-wide read-only Analytics role. None means nothing."""
+    if session.get('role') == ROLE_ANALYTICS:
+        return {}
+    return dashboard_scope()
+
+
+def parse_oid(value):
+    try:
+        return ObjectId(value)
+    except (InvalidId, TypeError):
+        return None
+
+
+def visible_tracker(tracker_id, projection=None):
+    """The tracker if the current user may see it, otherwise None.
+
+    Callers answer 404 rather than 403 either way, so a probe cannot use the
+    status code to learn which ids exist.
+    """
+    oid = parse_oid(tracker_id)
+    scope = visibility_scope()
+    if oid is None or scope is None:
+        return None
+    query = {'$and': [{'_id': oid}, scope]} if scope else {'_id': oid}
+    return mongo.db.trackers.find_one(query, projection)
+
+
+def can_write_chat(tracker):
+    """Only the participants may post to (or mark read in) a tracker's chat:
+    the owning FE, the assigned NS, and NOC Support Group supervising. FE-side
+    supervisors and Analytics can read but never write - the UI already hid
+    the input for them, but the API accepted their posts."""
+    role, uid = session.get('role'), session.get('user_id')
+    if role == ROLE_FE:
+        return (tracker.get('fe') or {}).get('id') == uid
+    if role == ROLE_NS:
+        return tracker.get('noc_assignee') == uid
+    return role == ROLE_NSG
+
+
+def link_media_to_tracker(tracker):
+    """Record the owning tracker on media stored before the tracker existed
+    (photos offloaded during creation), so /api/media can authorize it."""
+    ids = []
+    for images in ((tracker.get('site_verification') or {}).get('images'),
+                   ((tracker.get('sim') or {}).get('sim1') or {}).get('images'),
+                   ((tracker.get('sim') or {}).get('sim2') or {}).get('images'),
+                   (tracker.get('firmware') or {}).get('images'),
+                   (tracker.get('router') or {}).get('images')):
+        for img in images or []:
+            oid = parse_oid((img or {}).get('file_id'))
+            if oid:
+                ids.append(oid)
+    if ids:
+        mongo.db['media.files'].update_many(
+            {'_id': {'$in': ids}}, {'$set': {'metadata.tracker_id': str(tracker['_id'])}})
 
 
 def fe_visibility_query():
@@ -1273,7 +1358,12 @@ def api_hierarchy_drill_down():
             })
         return jsonify({'success': True, 'type': 'field_engineer_groups', 'data': data, 'total_count': len(data)})
     
-    # FSG or FS can drill down to FEs under a FEG
+    # FSG or FS can drill down to FEs under a FEG - an FS only under their own.
+    # Without this an FS could list any region's engineers with their contact details.
+    if role == ROLE_FS and feg_name and not mongo.db.users.count_documents(
+            {'role': ROLE_FEG, 'name': feg_name, 'field_support': session.get('field_support')}):
+        return jsonify({'error': 'Not in your region'}), 403
+
     if (role == ROLE_FSG or role == ROLE_FS) and feg_name:
         fes = list(mongo.db.users.find({'role': ROLE_FE, 'field_engineer_group': feg_name}))
         data = []
@@ -1486,6 +1576,7 @@ def api_create_tracker():
         return jsonify({'success': False, 'message': 'SDWAN ID already exists',
                         'tracker_id': str(existing['_id']) if existing else None}), 409
     tracker['_id'] = result.inserted_id
+    link_media_to_tracker(tracker)
     
     # Broadcast new tracker creation to all dashboards
     broadcast_dashboard_update(ROLE_NS, 'tracker_created', {
@@ -2887,7 +2978,7 @@ def api_get_reasons(category):
 @app.route('/api/trackers/<tracker_id>/chat/messages', methods=['GET'])
 @login_required
 def api_get_chat_messages(tracker_id):
-    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    tracker = visible_tracker(tracker_id)
     if not tracker:
         return jsonify({'error': 'Tracker not found'}), 404
 
@@ -2946,7 +3037,7 @@ def api_get_chat_messages(tracker_id):
 @app.route('/api/trackers/<tracker_id>/chat/send', methods=['POST'])
 @login_required
 def api_send_chat_message(tracker_id):
-    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    tracker = visible_tracker(tracker_id)
     if not tracker:
         return jsonify({'error': 'Tracker not found'}), 404
 
@@ -2955,6 +3046,9 @@ def api_send_chat_message(tracker_id):
         return jsonify({'error': 'Not your tracker'}), 403
     if user_role == ROLE_NS and tracker.get('noc_assignee') != session['user_id']:
         return jsonify({'error': 'Not assigned to you'}), 403
+
+    if not can_write_chat(tracker):
+        return jsonify({'error': 'Read-only access to this chat'}), 403
 
     if not is_chat_unlocked(tracker):
         return jsonify({'error': 'Chat is locked. Complete SIM activation and ZTP first.'}), 403
@@ -3008,7 +3102,7 @@ def api_send_chat_message(tracker_id):
 @app.route('/api/trackers/<tracker_id>/chat/upload', methods=['POST'])
 @login_required
 def api_upload_chat_file(tracker_id):
-    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    tracker = visible_tracker(tracker_id)
     if not tracker:
         return jsonify({'error': 'Tracker not found'}), 404
 
@@ -3017,6 +3111,8 @@ def api_upload_chat_file(tracker_id):
         return jsonify({'error': 'Not your tracker'}), 403
     if user_role == ROLE_NS and tracker.get('noc_assignee') != session['user_id']:
         return jsonify({'error': 'Not assigned to you'}), 403
+    if not can_write_chat(tracker):
+        return jsonify({'error': 'Read-only access to this chat'}), 403
     if not is_chat_unlocked(tracker):
         return jsonify({'error': 'Chat is locked'}), 403
 
@@ -3083,9 +3179,12 @@ def api_upload_chat_file(tracker_id):
 @app.route('/api/trackers/<tracker_id>/chat/mark-read', methods=['POST'])
 @login_required
 def api_mark_messages_read(tracker_id):
-    tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
+    tracker = visible_tracker(tracker_id)
     if not tracker:
         return jsonify({'error': 'Tracker not found'}), 404
+    # Marking read changes the other side's unread badge, so only participants may.
+    if not can_write_chat(tracker):
+        return jsonify({'error': 'Read-only access to this chat'}), 403
     mongo.db.chat_messages.update_many(
         {'tracker_id': tracker_id, 'sender_role': {'$ne': session.get('role')}, 'read': False},
         {'$set': {'read': True}}

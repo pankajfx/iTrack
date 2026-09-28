@@ -1,3 +1,40 @@
+# ─── Async mode: must run before anything else is imported ───────────────────
+# gevent/eventlet serve thousands of connections per process with cooperative
+# green threads, but only if the standard library's socket, ssl, time and
+# threading are patched FIRST - otherwise every MongoDB call blocks the whole
+# process. The mode can come from .env, so load it before deciding.
+import os
+from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
+_ASYNC_MODE = os.environ.get('SOCKETIO_ASYNC_MODE', 'threading').strip().lower()
+if _ASYNC_MODE == 'gevent':
+    from gevent import monkey
+    if not monkey.is_module_patched('socket'):       # gunicorn's gevent worker patches first
+        monkey.patch_all()
+elif _ASYNC_MODE == 'eventlet':
+    # Measured: with PyMongo on Windows the process hangs in eventlet's select hub
+    # on the first database call, and eventlet itself is deprecated upstream.
+    raise RuntimeError('SOCKETIO_ASYNC_MODE=eventlet is not supported: it hangs with PyMongo on '
+                       'Windows and is deprecated upstream. Use gevent (production) or threading (dev).')
+elif _ASYNC_MODE != 'threading':
+    raise RuntimeError('SOCKETIO_ASYNC_MODE must be threading or gevent, not %r' % _ASYNC_MODE)
+
+
+def run_blocking(fn, *args, **kwargs):
+    """Run CPU-heavy work (password hashing, image re-encoding) off the event loop.
+
+    Under gevent every request and socket in the process shares one loop, so a
+    CPU-bound call stalls all of them: 40 simultaneous logins (scrypt) delayed
+    unrelated requests by up to 1.6 s in testing. gevent's thread pool runs the
+    work on real threads; scrypt and Pillow release the GIL, so it also uses
+    more than one core. Under threading mode it simply runs inline.
+    """
+    if _ASYNC_MODE == 'gevent':
+        import gevent
+        return gevent.get_hub().threadpool.apply(fn, args, kwargs)
+    return fn(*args, **kwargs)
+
+
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash, send_file
 from flask_pymongo import PyMongo
 from flask.sessions import SecureCookieSessionInterface
@@ -14,6 +51,7 @@ from pymongo import ReturnDocument
 import gridfs
 import base64
 import re
+from io import BytesIO
 from pymongo.errors import DuplicateKeyError
 import os
 import hmac
@@ -738,6 +776,17 @@ def csrf_protect():
     return None
 
 
+@app.route('/healthz')
+def healthz():
+    """Liveness + database reachability for load balancers and monitoring.
+    Unauthenticated, so it reveals nothing beyond up/down."""
+    try:
+        mongo.db.command('ping')
+        return jsonify({'status': 'ok'}), 200
+    except Exception:
+        return jsonify({'status': 'degraded'}), 503
+
+
 @app.route('/api/csrf-token')
 def api_csrf_token():
     """Fresh token for a page whose token went stale (e.g. the user signed in
@@ -1037,8 +1086,9 @@ def api_login():
         return throttled_response(wait)
 
     user = mongo.db.users.find_one(query)
-    password_ok = check_password_hash(user.get('password') or _DUMMY_PASSWORD_HASH if user
-                                      else _DUMMY_PASSWORD_HASH, password)
+    password_ok = run_blocking(check_password_hash,
+                               user.get('password') or _DUMMY_PASSWORD_HASH if user
+                               else _DUMMY_PASSWORD_HASH, password)
     if not user or not password_ok or user.get('active') is False:
         record_login_failure(account_key)
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
@@ -3495,6 +3545,30 @@ def api_send_chat_message(tracker_id):
     return jsonify({'success': True, 'message': serialize_doc(message)})
 
 
+def _reencode_chat_image(file_data):
+    """Decode, flatten, resize and re-encode a chat photo (CPU-heavy - called
+    through run_blocking). Governed by MEDIA_PROFILE / IMAGE_MAX_DIM /
+    IMAGE_QUALITY; IMAGE_MAX_DIM = 0 keeps the original dimensions."""
+    from PIL import Image
+    img = Image.open(BytesIO(file_data))
+    if IMAGE_MAX_DIM:
+        # JPEG draft mode decodes at a reduced scale when the target is smaller,
+        # so a 50-megapixel phone photo never has to be expanded in full.
+        img.draft('RGB', (IMAGE_MAX_DIM, IMAGE_MAX_DIM))
+    if img.mode in ('RGBA', 'LA', 'P'):
+        bg = Image.new('RGB', img.size, (255, 255, 255))
+        if img.mode == 'P':
+            img = img.convert('RGBA')
+        bg.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
+        img = bg
+    if IMAGE_MAX_DIM and max(img.size) > IMAGE_MAX_DIM:
+        ratio = IMAGE_MAX_DIM / max(img.size)
+        img = img.resize(tuple(int(d * ratio) for d in img.size), Image.Resampling.LANCZOS)
+    out = BytesIO()
+    img.convert('RGB').save(out, format='JPEG', quality=IMAGE_QUALITY, optimize=True)
+    return out.getvalue()
+
+
 @app.route('/api/trackers/<tracker_id>/chat/upload', methods=['POST'])
 @login_required
 def api_upload_chat_file(tracker_id):
@@ -3531,23 +3605,7 @@ def api_upload_chat_file(tracker_id):
         if file_data[:5] in (b'<!DOC', b'<html') or b'<!DOCTYPE' in file_data[:100]:
             return jsonify({'error': 'Invalid file type. Please upload an image file.'}), 400
         try:
-            from PIL import Image
-            img = Image.open(BytesIO(file_data))
-            if img.mode in ('RGBA', 'LA', 'P'):
-                bg = Image.new('RGB', img.size, (255, 255, 255))
-                if img.mode == 'P':
-                    img = img.convert('RGBA')
-                bg.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
-                img = bg
-            # Governed by MEDIA_PROFILE / IMAGE_MAX_DIM / IMAGE_QUALITY so the
-            # fidelity-vs-bandwidth trade can be changed without a deploy.
-            # IMAGE_MAX_DIM = 0 keeps the original dimensions.
-            if IMAGE_MAX_DIM and max(img.size) > IMAGE_MAX_DIM:
-                ratio = IMAGE_MAX_DIM / max(img.size)
-                img = img.resize(tuple(int(d * ratio) for d in img.size), Image.Resampling.LANCZOS)
-            out = BytesIO()
-            img.save(out, format='JPEG', quality=IMAGE_QUALITY, optimize=True)
-            file_data = out.getvalue()
+            file_data = run_blocking(_reencode_chat_image, file_data)
             mime_type = 'image/jpeg'
         except ImportError:
             mime_type = file.content_type or 'image/jpeg'
@@ -4495,7 +4553,7 @@ def admin_create_user():
     doc = {
         'name':     name,
         'username': username,
-        'password': generate_password_hash(password),
+        'password': run_blocking(generate_password_hash, password),
         'role':     role,
         'created_at': get_utc_now(),
     }
@@ -4552,7 +4610,7 @@ def admin_update_user(user_id):
         return jsonify({'error': 'Password must be at least %d characters' % MIN_USER_PASSWORD_LENGTH}), 400
     revoke = False
     if password:
-        set_ops['password'] = generate_password_hash(password)
+        set_ops['password'] = run_blocking(generate_password_hash, password)
         revoke = True
 
     # Deactivation locks the account out of login and ends its sessions.
@@ -4774,5 +4832,10 @@ if __name__ == '__main__':
               'Adding workers without it silently breaks Socket.IO broadcasts.')
     debug = FLASK_DEBUG
     port = int(os.environ.get('PORT', 5001))
-    socketio.run(app, debug=debug, host='0.0.0.0', port=port)
+    # Behind a trusted proxy the app must not be reachable directly: a client
+    # talking to it straight could forge X-Forwarded-For and dodge the per-IP
+    # login limits. So with TRUST_PROXY_HOPS set, the default bind is loopback.
+    host = os.environ.get('HOST') or ('127.0.0.1' if TRUST_PROXY_HOPS > 0 else '0.0.0.0')
+    print(f'[startup] {SOCKETIO_ASYNC_MODE} mode, listening on {host}:{port}')
+    socketio.run(app, debug=debug, host=host, port=port)
 

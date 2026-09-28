@@ -1,8 +1,8 @@
 # ─── Async mode: must run before anything else is imported ───────────────────
-# gevent/eventlet serve thousands of connections per process with cooperative
-# green threads, but only if the standard library's socket, ssl, time and
-# threading are patched FIRST - otherwise every MongoDB call blocks the whole
-# process. The mode can come from .env, so load it before deciding.
+# gevent serves thousands of connections per process with cooperative green
+# threads, but only if the standard library's socket, ssl, time and threading
+# are patched FIRST - otherwise every MongoDB call blocks the whole process.
+# The mode can come from .env, so load it before deciding.
 import os
 from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'))
@@ -53,7 +53,7 @@ import base64
 import re
 from io import BytesIO
 from pymongo.errors import DuplicateKeyError
-import os
+import sys
 import hmac
 import secrets
 import time
@@ -73,7 +73,8 @@ app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-i
 _mongo_uri = os.environ.get('MONGO_URI', 'mongodb://localhost:27017/sdwan_tracker')
 if 'maxPoolSize' not in _mongo_uri:
     _pool = os.environ.get('MONGO_MAX_POOL_SIZE', '100')
-    _mongo_uri += ('&' if '?' in _mongo_uri else '?') +                   f'maxPoolSize={_pool}&minPoolSize=5&waitQueueTimeoutMS=5000&retryWrites=true'
+    _mongo_uri += (('&' if '?' in _mongo_uri else '?') +
+                   f'maxPoolSize={_pool}&minPoolSize=5&waitQueueTimeoutMS=5000&retryWrites=true')
 app.config['MONGO_URI'] = _mongo_uri
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
@@ -116,16 +117,16 @@ if app.config['SECRET_KEY'] in _WEAK_SECRETS or len(app.config['SECRET_KEY']) < 
             'python -c "import secrets; print(secrets.token_urlsafe(48))"  and set it in .env')
 
 mongo = PyMongo(app)
-# Serving model. async_mode='threading' + socketio.run() is the Werkzeug dev
-# server: one process, one thread per connection, and no way to add workers -
-# without a message queue a second worker cannot see the first worker's rooms, so
-# broadcasts reach only the clients attached to whichever worker emitted them.
-#
-#   SOCKETIO_ASYNC_MODE    threading (default, dev) | gevent | eventlet
-#   SOCKETIO_MESSAGE_QUEUE redis://host:6379/0 - REQUIRED before running >1 worker
-#
-# Production (see PROJECT_GUIDE section 15.5 item 9):
-#   SOCKETIO_ASYNC_MODE=gevent SOCKETIO_MESSAGE_QUEUE=redis://127.0.0.1:6379/0 #   gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 4 app:app
+# Serving model (PROJECT_GUIDE section 9 has the full deployment guide):
+#   SOCKETIO_ASYNC_MODE=threading  development default: Werkzeug dev server, one
+#                                  OS thread per connection. Refuses to run as a
+#                                  service (no console) - that is deliberate.
+#   SOCKETIO_ASYNC_MODE=gevent     production: `python app.py` serves HTTP and
+#                                  WebSocket on one event loop (Windows and Linux).
+# One process is the unit. A second process - another instance, or any gunicorn
+# -w above 1 - needs BOTH a message queue (SOCKETIO_MESSAGE_QUEUE=redis://...), so
+# a broadcast reaches clients attached to the other process, AND sticky sessions
+# at the proxy, because a Socket.IO session lives in the process that opened it.
 SOCKETIO_ASYNC_MODE    = os.environ.get('SOCKETIO_ASYNC_MODE', 'threading')
 SOCKETIO_MESSAGE_QUEUE = os.environ.get('SOCKETIO_MESSAGE_QUEUE') or None
 
@@ -4822,14 +4823,22 @@ with app.app_context():
 
 
 if __name__ == '__main__':
-    # Development entry point only. This is the Werkzeug dev server; see the
-    # SocketIO configuration above for how to run this in production.
+    # The entry point in every mode. Under SOCKETIO_ASYNC_MODE=gevent this is the
+    # production server (gevent WSGI + WebSocket); under threading it is the
+    # Werkzeug development server.
+    if SOCKETIO_ASYNC_MODE == 'threading' and not (sys.stdin and sys.stdin.isatty()):
+        # Flask-SocketIO refuses to start its Werkzeug development server without a
+        # console, and its message suggests allow_unsafe_werkzeug=True - the wrong
+        # fix. Say what the right one is.
+        raise SystemExit('[error] SOCKETIO_ASYNC_MODE=threading is the development server and '
+                         'cannot run without a console (for example as a Windows service). '
+                         'Set SOCKETIO_ASYNC_MODE=gevent - see PROJECT_GUIDE section 9.')
     if SOCKETIO_ASYNC_MODE == 'threading' and not FLASK_DEBUG:
         print('[warning] async_mode=threading is the development server. '
-              'Set SOCKETIO_ASYNC_MODE=gevent and SOCKETIO_MESSAGE_QUEUE for production.')
+              'Set SOCKETIO_ASYNC_MODE=gevent for production (PROJECT_GUIDE section 9).')
     if SOCKETIO_MESSAGE_QUEUE is None:
-        print('[warning] no SOCKETIO_MESSAGE_QUEUE: safe for a single process only. '
-              'Adding workers without it silently breaks Socket.IO broadcasts.')
+        print('[info] no SOCKETIO_MESSAGE_QUEUE: correct for one process. Running more '
+              'than one needs the queue and sticky sessions (PROJECT_GUIDE section 9).')
     debug = FLASK_DEBUG
     port = int(os.environ.get('PORT', 5001))
     # Behind a trusted proxy the app must not be reachable directly: a client

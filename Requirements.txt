@@ -8,3 +8,7 @@ openpyxl==3.1.2
 flask-socketio==5.3.6
 python-socketio==5.11.1
 simple-websocket>=1.0.0
+# Production server (SOCKETIO_ASYNC_MODE=gevent). Pinned to the versions measured
+# in PROJECT_GUIDE section 9; unused in the threading development mode.
+gevent==24.2.1
+gevent-websocket==0.10.1

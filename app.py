@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, jsonify, session, redirect, url_for, flash, send_file
 from flask_pymongo import PyMongo
+from flask.sessions import SecureCookieSessionInterface
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -33,8 +34,6 @@ if 'maxPoolSize' not in _mongo_uri:
     _pool = os.environ.get('MONGO_MAX_POOL_SIZE', '100')
     _mongo_uri += ('&' if '?' in _mongo_uri else '?') +                   f'maxPoolSize={_pool}&minPoolSize=5&waitQueueTimeoutMS=5000&retryWrites=true'
 app.config['MONGO_URI'] = _mongo_uri
-#prod
-# app.config['MONGO_URI'] = os.environ.get('MONGO_URI', 'mongodb://myAdminUser:MyStrongPassword123@localhost:27017/sdwan_tracker?authSource=admin')
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 
@@ -61,6 +60,19 @@ def _static_fingerprint():
 
 
 STATIC_VERSION = os.environ.get('STATIC_VERSION') or _static_fingerprint()
+
+# The session cookie is signed with SECRET_KEY; anyone holding it can mint a
+# session for any user and role. The default used to be a fixed string in this
+# file. Outside debug mode the app now refuses to start without a real one.
+_WEAK_SECRETS = {'', 'dev-secret-key-change-in-production', 'your-strong-secret-key',
+                 'change-me', 'changeme', 'secret'}
+if app.config['SECRET_KEY'] in _WEAK_SECRETS or len(app.config['SECRET_KEY']) < 32:
+    if FLASK_DEBUG:
+        print('[warning] SECRET_KEY is weak or missing - tolerated only because FLASK_DEBUG=true')
+    else:
+        raise RuntimeError(
+            'SECRET_KEY is missing or weak (need at least 32 random characters). Generate one with:  '
+            'python -c "import secrets; print(secrets.token_urlsafe(48))"  and set it in .env')
 
 mongo = PyMongo(app)
 # Serving model. async_mode='threading' + socketio.run() is the Werkzeug dev
@@ -191,6 +203,74 @@ TRUST_PROXY_HOPS = _env_int('TRUST_PROXY_HOPS', 0)
 if TRUST_PROXY_HOPS > 0:
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUST_PROXY_HOPS, x_proto=TRUST_PROXY_HOPS,
                             x_host=TRUST_PROXY_HOPS, x_port=TRUST_PROXY_HOPS)
+
+# ─── Session cookie ──────────────────────────────────────────────────────────
+# HttpOnly: page scripts cannot read it. SameSite=Lax: other sites' POSTs do
+# not carry it. Lax rather than Strict, because Strict also drops the cookie on
+# top-level links from outside (a tracker link shared in WhatsApp or email would
+# land the user logged out). Secure is decided per request (SESSION_COOKIE_SECURE
+# = auto): set whenever the request arrived over HTTPS - directly, or through a
+# proxy when TRUST_PROXY_HOPS is set - so plain-HTTP development keeps working.
+# Force it with SESSION_COOKIE_SECURE=true once everything is served over HTTPS.
+SESSION_COOKIE_SECURE_MODE = os.environ.get('SESSION_COOKIE_SECURE', 'auto').strip().lower()
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+
+class _AutoSecureSessionInterface(SecureCookieSessionInterface):
+    def get_cookie_secure(self, app):
+        if SESSION_COOKIE_SECURE_MODE in ('1', 'true', 'yes'):
+            return True
+        if SESSION_COOKIE_SECURE_MODE in ('0', 'false', 'no'):
+            return False
+        return request.is_secure
+
+
+app.session_interface = _AutoSecureSessionInterface()
+
+# ─── Response headers ────────────────────────────────────────────────────────
+# CSP: scripts, styles, fonts, images and connections only from this origin (all
+# vendor assets are self-hosted), plus reverse geocoding (CSP_CONNECT_EXTRA,
+# default Nominatim). 'unsafe-inline' remains for scripts and styles because the
+# templates use inline <script> blocks and onclick= attributes throughout;
+# removing it means moving every handler into files - tracked in PROJECT_GUIDE.
+# HSTS is opt-in (HSTS_MAX_AGE) - only enable it once a trusted certificate and
+# a stable hostname are in place, because browsers then refuse plain HTTP.
+CSP_CONNECT_EXTRA = os.environ.get('CSP_CONNECT_EXTRA', 'https://nominatim.openstreetmap.org').split()
+HSTS_MAX_AGE = _env_int('HSTS_MAX_AGE', 0)
+_CSP = '; '.join([
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' data: blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' ws: wss: " + ' '.join(CSP_CONNECT_EXTRA),
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+
+@app.after_request
+def security_headers(resp):
+    h = resp.headers
+    h.setdefault('X-Content-Type-Options', 'nosniff')
+    h.setdefault('X-Frame-Options', 'DENY')
+    h.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    h.setdefault('Permissions-Policy', 'camera=(self), microphone=(self), geolocation=(self), '
+                                       'payment=(), usb=(), serial=(), bluetooth=()')
+    h.setdefault('Cross-Origin-Opener-Policy', 'same-origin')
+    if 'Content-Security-Policy' not in h:       # /api/media sets a stricter sandbox policy
+        h['Content-Security-Policy'] = _CSP
+    if HSTS_MAX_AGE > 0 and request.is_secure:
+        h.setdefault('Strict-Transport-Security', 'max-age=%d' % HSTS_MAX_AGE)
+    # Authenticated JSON must not linger in shared caches or the back/forward cache.
+    if request.path.startswith('/api/') and not request.path.startswith('/api/media/'):
+        h['Cache-Control'] = 'no-store'
+    return resp
 
 
 # ─── Tracker status constants ────────────────────────────────────────────────
@@ -410,6 +490,28 @@ def make_event(stage, actor_id, actor_role, remarks, metadata=None):
 @app.errorhandler(InvalidId)
 def handle_invalid_object_id(_e):
     return jsonify({'error': 'Not found'}), 404
+
+
+@app.errorhandler(404)
+def handle_not_found(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Not found'}), 404
+    return e
+
+
+@app.errorhandler(405)
+def handle_method_not_allowed(e):
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Method not allowed'}), 405
+    return e
+
+
+@app.errorhandler(500)
+def handle_server_error(e):
+    # Flask has already logged the traceback; the client gets no internals.
+    if request.path.startswith('/api/'):
+        return jsonify({'error': 'Internal server error'}), 500
+    return e
 
 
 # ─── Login throttling ────────────────────────────────────────────────────────
@@ -3415,7 +3517,8 @@ def api_upload_chat_file(tracker_id):
         except ImportError:
             mime_type = file.content_type or 'image/jpeg'
         except Exception as e:
-            return jsonify({'error': f'Failed to process image: {str(e)}'}), 400
+            print(f"[upload] image rejected: {e!r}")
+            return jsonify({'error': 'Could not read that image. Try a JPEG or PNG photo.'}), 400
     elif file_type == 'audio':
         mime_type = file.content_type or 'audio/webm'
     else:
@@ -4126,7 +4229,8 @@ def api_analytics_export_fe():
     except ImportError:
         return jsonify({'error': 'openpyxl not installed. Run: pip install openpyxl'}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"[error] {request.method} {request.path}: {e!r}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 @app.route('/api/NOC_SUPPORT_GROUP/export/noc')
@@ -4193,7 +4297,8 @@ def api_analytics_export_noc():
     except ImportError:
         return jsonify({'error': 'openpyxl not installed. Run: pip install openpyxl'}), 500
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        print(f"[error] {request.method} {request.path}: {e!r}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 
 # ─── Admin: User Management ─────────────────────────────────────────────────

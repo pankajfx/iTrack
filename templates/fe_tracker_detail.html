@@ -1150,6 +1150,8 @@ async function submitSVResubmit() {
 // ─── Init ───────────────────────────────────────────────────────────────────
 loadTracker();
 setInterval(loadTracker, 30000);  // Auto-refresh every 30s for FE (less aggressive)
+// After a reconnect: re-fetch the tracker (events emitted while offline are not replayed).
+window.onSocketReconnect(loadTracker);
 </script>
 
 <!-- Site Verification Resubmit Modal -->

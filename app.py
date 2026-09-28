@@ -104,6 +104,11 @@ socketio = SocketIO(app,
                     cors_allowed_origins=SOCKET_ALLOWED_ORIGINS,
                     async_mode=SOCKETIO_ASYNC_MODE,
                     message_queue=SOCKETIO_MESSAGE_QUEUE,
+                    # Heartbeat: a silent client is dropped after interval+timeout
+                    # seconds. Reverse proxies must allow idle connections longer
+                    # than the interval (Nginx proxy_read_timeout >= 60s).
+                    ping_interval=int(os.environ.get('SOCKETIO_PING_INTERVAL', '25')),
+                    ping_timeout=int(os.environ.get('SOCKETIO_PING_TIMEOUT', '20')),
                     # Clients only ever send tiny join/leave events.
                     max_http_buffer_size=64 * 1024)
 

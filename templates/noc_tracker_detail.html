@@ -1644,6 +1644,8 @@ window.onSocketReady(function() {
 // ─── Init ───────────────────────────────────────────────────────────────────
 loadTracker();
 setInterval(loadTracker, 15000);   // Refresh data every 15s
+// After a reconnect: re-fetch the tracker (events emitted while offline are not replayed).
+window.onSocketReconnect(loadTracker);
 setInterval(updateTimers, 1000);   // Tick timers every 1s
 </script>
 

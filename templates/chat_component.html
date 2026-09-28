@@ -213,6 +213,8 @@
     // (re)connect; listeners are registered once. They are registered even while
     // chat is locked, so an unlock arrives live.
     var _chatListenersAdded = false;
+    // After a reconnect: fetch messages sent while offline (incremental, ?since=).
+    window.onSocketReconnect(loadChat);
     window.onSocketReady(function () {
         window.socket.emit('join_tracker', { tracker_id: trackerId });
         if (_chatListenersAdded) return;

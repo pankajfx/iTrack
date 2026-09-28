@@ -915,6 +915,8 @@
 
     // Refresh every 30 seconds
     setInterval(loadTrackers, 120000);   // safety net only - Socket.IO carries live updates
+    // After a reconnect: re-fetch what may have changed while offline.
+    window.onSocketReconnect(function () { loadTrackers(); loadReassignmentRequests(); });
 
     // ─── Reassignment Requests Functions ────────────────────────────────────
     let reassignmentRequests = [];

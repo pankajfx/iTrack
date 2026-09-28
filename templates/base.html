@@ -24,6 +24,15 @@
             if (window._socketReady) fn();
         };
 
+        // Runs after a RE-connect (not the first connect): pages re-fetch what
+        // they may have missed while offline. Socket.IO delivers each event at
+        // most once and never replays - anything emitted while this page was
+        // disconnected is simply gone - so catch-up must come from the REST API.
+        window._socketReconnectCallbacks = [];
+        window.onSocketReconnect = function(fn) {
+            window._socketReconnectCallbacks.push(fn);
+        };
+
     </script>
     <!-- CSRF token + session-expiry handling for every fetch() on the page. -->
     <script src="/static/js/secure_fetch.js?v={{ config.STATIC_VERSION }}"></script>
@@ -950,18 +959,34 @@
         {% if session.get('user_id') %}
         // Connect immediately - io() is available because the script above already ran.
         window.socket = io({
-            transports: ['websocket', 'polling'],
+            // Long-polling first, then upgrade to WebSocket. This client (4.7.2)
+            // does NOT fall back from a failed WebSocket to polling, so the old
+            // websocket-first order meant no live updates at all behind a proxy
+            // that does not forward upgrades. Polling works through anything and
+            // upgrades where it can. More than one app process then requires
+            // sticky sessions - see PROJECT_GUIDE section 9.
+            transports: ['polling', 'websocket'],
             reconnection: true,
+            // Was 10 attempts (~30s): after that the page stayed offline until
+            // reloaded - common on field networks.
+            reconnectionAttempts: Infinity,
             reconnectionDelay: 1000,
-            reconnectionAttempts: 10
+            reconnectionDelayMax: 15000,
+            // Jitter, so thousands of clients do not reconnect in the same
+            // second when the server restarts.
+            randomizationFactor: 0.5,
+            timeout: 20000
         });
 
         window.socket.on('connect', function() {
             console.log('[Socket.IO] Connected:', window.socket.id);
+            var isReconnect = !!window._socketEverConnected;
+            window._socketEverConnected = true;
             window._socketReady = true;
             _updateSocketStatus(true);
-            // Fire every registered callback — covers both initial setup and reconnect room-rejoins.
+            // Fire every registered callback - covers both initial setup and reconnect room-rejoins.
             window._socketCallbacks.forEach(function(fn) { fn(); });
+            if (isReconnect) _runReconnectCallbacks();
         });
 
         window.socket.on('disconnect', function() {
@@ -979,6 +1004,30 @@
 
         // The admin panel revoked this account's sessions.
         window.socket.on('session_ended', _sessionEnded);
+
+        function _runReconnectCallbacks() {
+            window._socketReconnectCallbacks.forEach(function(fn) {
+                try { fn(); } catch (e) { console.error('[Socket.IO] catch-up failed:', e); }
+            });
+        }
+
+        // Mobile browsers freeze background tabs. On return: reconnect at once
+        // instead of waiting out the backoff, and catch up if the page was away
+        // long enough to have missed events without noticing a disconnect.
+        var _hiddenAt = null;
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) { _hiddenAt = Date.now(); return; }
+            var away = _hiddenAt ? Date.now() - _hiddenAt : 0;
+            _hiddenAt = null;
+            if (!window.socket.connected) {
+                window.socket.disconnect().connect();     // skip the pending backoff delay
+            } else if (away > 30000) {
+                _runReconnectCallbacks();
+            }
+        });
+        window.addEventListener('online', function() {
+            if (!window.socket.connected) window.socket.disconnect().connect();
+        });
 
         function _sessionEnded() {
             if (window.__redirectingToLogin) return;

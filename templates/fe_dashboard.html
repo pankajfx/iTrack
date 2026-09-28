@@ -2255,6 +2255,10 @@ document.getElementById('site-presence-modal').addEventListener('click', functio
         }
     }
 
+    // After a reconnect: re-fetch counts and the visible page (events emitted
+    // while offline are not replayed).
+    window.onSocketReconnect(loadInstallations);
+
     // Badges first - they are a few hundred bytes off an index, so the tabs fill
     // immediately rather than waiting on the full list download.
     loadInstallations();

@@ -562,17 +562,33 @@ def clear_login_failures(account_key):
 
 def throttled_response(wait):
     minutes = max(1, int(round(wait / 60.0)))
-    resp = jsonify({'success': False,
-                    'message': 'Too many failed attempts. Try again in %d minute%s.'
-                               % (minutes, '' if minutes == 1 else 's')})
+    text = 'Too many failed attempts. Try again in %d minute%s.' % (minutes, '' if minutes == 1 else 's')
+    resp = jsonify({'success': False, 'message': text, 'error': text})
     resp.status_code = 429
     resp.headers['Retry-After'] = str(int(wait) + 1)
     return resp
 
 
-def ensure_security_indexes():
-    """TTL cleanup for login_attempts plus the lookup index; idempotent."""
+AUDIT_RETENTION_DAYS = _env_int('AUDIT_RETENTION_DAYS', 365)
+
+
+def audit(action, **details):
+    """Append-only record of security-relevant actions (admin sign-ins and user
+    changes). Never contains passwords. Best effort: auditing must not break
+    the action it records."""
     try:
+        mongo.db.audit_logs.insert_one({'at': get_utc_now(), 'action': action,
+                                        'ip': request.remote_addr, 'details': details})
+    except Exception as exc:
+        print(f"[audit] could not record {action}: {exc!r}")
+
+
+def ensure_security_indexes():
+    """TTL cleanup for login_attempts and audit_logs plus lookup indexes; idempotent."""
+    try:
+        mongo.db.audit_logs.create_index('at', name='audit_logs_ttl',
+                                         expireAfterSeconds=AUDIT_RETENTION_DAYS * 86400)
+        mongo.db.audit_logs.create_index([('action', 1), ('at', -1)], name='audit_logs_action_at')
         mongo.db.login_attempts.create_index([('key', 1), ('at', 1)], name='login_attempts_key_at')
         mongo.db.login_attempts.create_index('at', name='login_attempts_ttl',
                                              expireAfterSeconds=max(LOGIN_WINDOW_MINUTES, 60) * 60)
@@ -4305,7 +4321,32 @@ def api_analytics_export_noc():
 # Separate password-gated admin panel for managing users (create / update).
 # Admin session is tracked independently of the regular user session.
 
-ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', 'qwerty')
+# The admin panel can create and edit every account, including passwords and
+# roles, so its password is held to a standard: set, 12+ characters, and not a
+# common password. It used to default to 'qwerty' - and the committed
+# .env.example set exactly that. Otherwise the panel stays disabled and says why.
+ADMIN_PASSWORD = os.environ.get('ADMIN_PASSWORD', '')
+ADMIN_SESSION_MINUTES = _env_int('ADMIN_SESSION_MINUTES', 30)
+_COMMON_PASSWORDS = {'qwerty', 'qwerty123', 'password', 'password1', 'password123', 'admin',
+                     'admin123', 'administrator', '123456', '12345678', '123456789',
+                     '1234567890', 'changeme', 'change-me', 'letmein', 'welcome', 'iloveyou'}
+
+
+def _admin_password_problem():
+    if not ADMIN_PASSWORD:
+        return 'ADMIN_PASSWORD is not set'
+    if len(ADMIN_PASSWORD) < 12:
+        return 'ADMIN_PASSWORD is shorter than 12 characters'
+    if ADMIN_PASSWORD.lower() in _COMMON_PASSWORDS:
+        return 'ADMIN_PASSWORD is a common password'
+    return None
+
+
+ADMIN_DISABLED_REASON = _admin_password_problem()
+if ADMIN_DISABLED_REASON:
+    print('[warning] admin panel disabled: %s - set a strong one in .env' % ADMIN_DISABLED_REASON)
+
+MIN_USER_PASSWORD_LENGTH = 8
 
 # Role → human label mapping for display
 ROLE_LABELS = {
@@ -4332,12 +4373,30 @@ ROLE_FIELDS = {
 
 
 def admin_required(f):
+    """Admin API access: panel enabled, authenticated, and active within the
+    last ADMIN_SESSION_MINUTES (sliding idle timeout)."""
     @wraps(f)
     def decorated(*args, **kwargs):
-        if not session.get('admin_authenticated'):
+        if ADMIN_DISABLED_REASON:
+            return jsonify({'error': 'Admin panel disabled: ' + ADMIN_DISABLED_REASON}), 503
+        last = session.get('admin_at', 0)
+        if not session.get('admin_authenticated') or time.time() - last > ADMIN_SESSION_MINUTES * 60:
+            session.pop('admin_authenticated', None)
+            session.pop('admin_at', None)
             return jsonify({'error': 'Admin authentication required'}), 403
+        session['admin_at'] = time.time()
         return f(*args, **kwargs)
     return decorated
+
+
+def _clean_str(data, key, limit=200):
+    """Stripped string field, '' if absent; None if present but not a string."""
+    value = data.get(key)
+    if value is None:
+        return ''
+    if not isinstance(value, str) or len(value) > limit:
+        return None
+    return value.strip()
 
 
 @app.route('/admin')
@@ -4345,21 +4404,36 @@ def admin_page():
     return render_template('admin_users.html',
                            role_labels=ROLE_LABELS,
                            role_fields=ROLE_FIELDS,
-                           all_roles=list(ROLE_LABELS.keys()))
+                           all_roles=list(ROLE_LABELS.keys()),
+                           admin_disabled_reason=ADMIN_DISABLED_REASON)
 
 
 @app.route('/admin/auth', methods=['POST'])
 def admin_auth():
-    data = request.json or {}
-    if data.get('password') == ADMIN_PASSWORD:
+    if ADMIN_DISABLED_REASON:
+        return jsonify({'success': False, 'error': 'Admin panel disabled: ' + ADMIN_DISABLED_REASON}), 503
+    # Same Mongo-backed limits as user login, under one shared 'admin' account.
+    wait = login_lockout_seconds('admin')
+    if wait > 0:
+        return throttled_response(wait)
+    supplied = (request.get_json(silent=True) or {}).get('password')
+    # Constant-time comparison: '==' returns at the first differing character.
+    if isinstance(supplied, str) and hmac.compare_digest(supplied.encode('utf-8'),
+                                                         ADMIN_PASSWORD.encode('utf-8')):
+        clear_login_failures('admin')
         session['admin_authenticated'] = True
+        session['admin_at'] = time.time()
+        audit('admin_login')
         return jsonify({'success': True})
+    record_login_failure('admin')
+    audit('admin_login_failed')
     return jsonify({'success': False, 'error': 'Incorrect password'}), 401
 
 
 @app.route('/admin/logout', methods=['POST'])
 def admin_logout():
     session.pop('admin_authenticated', None)
+    session.pop('admin_at', None)
     return jsonify({'success': True})
 
 
@@ -4380,14 +4454,16 @@ def admin_create_user():
     if role not in ROLE_LABELS:
         return jsonify({'error': 'Invalid role'}), 400
 
-    name = (data.get('name') or '').strip()
-    username = (data.get('username') or '').strip()
+    name = _clean_str(data, 'name')
+    username = _clean_str(data, 'username')
     password = data.get('password', '')
+    if name is None or username is None or not isinstance(password, str):
+        return jsonify({'error': 'Invalid field value'}), 400
 
     if not name:
         return jsonify({'error': 'Name is required'}), 400
-    if not password:
-        return jsonify({'error': 'Password is required'}), 400
+    if len(password) < MIN_USER_PASSWORD_LENGTH:
+        return jsonify({'error': 'Password must be at least %d characters' % MIN_USER_PASSWORD_LENGTH}), 400
 
     # username defaults to name if not provided
     if not username:
@@ -4407,11 +4483,14 @@ def admin_create_user():
     # Optional role-specific fields
     for field in ['zone', 'region', 'state', 'field_engineer_group', 'field_support',
                   'field_support_group', 'email', 'contact', 'location']:
-        val = (data.get(field) or '').strip()
+        val = _clean_str(data, field)
+        if val is None:
+            return jsonify({'error': 'Invalid value for %s' % field}), 400
         if val:
             doc[field] = val
 
     result = mongo.db.users.insert_one(doc)
+    audit('user_created', user_id=str(result.inserted_id), username=username, role=role)
     return jsonify({'success': True, 'id': str(result.inserted_id)}), 201
 
 
@@ -4430,13 +4509,16 @@ def admin_update_user(user_id):
 
     set_ops = {}
 
+    name = _clean_str(data, 'name')
+    username = _clean_str(data, 'username')
+    if name is None or username is None:
+        return jsonify({'error': 'Invalid field value'}), 400
+
     # Name
-    name = (data.get('name') or '').strip()
     if name:
         set_ops['name'] = name
 
-    # Username — check uniqueness if changed
-    username = (data.get('username') or '').strip()
+    # Username - check uniqueness if changed
     if username and username != user.get('username'):
         if mongo.db.users.find_one({'username': username, '_id': {'$ne': oid}}):
             return jsonify({'error': f'Username "{username}" already exists'}), 409
@@ -4445,6 +4527,10 @@ def admin_update_user(user_id):
     # Password - only update if provided. Changing it revokes every existing
     # session for the account (session_user_valid compares session_epoch).
     password = data.get('password', '')
+    if not isinstance(password, str):
+        return jsonify({'error': 'Invalid field value'}), 400
+    if password and len(password) < MIN_USER_PASSWORD_LENGTH:
+        return jsonify({'error': 'Password must be at least %d characters' % MIN_USER_PASSWORD_LENGTH}), 400
     revoke = False
     if password:
         set_ops['password'] = generate_password_hash(password)
@@ -4459,7 +4545,10 @@ def admin_update_user(user_id):
     for field in ['zone', 'region', 'state', 'field_engineer_group', 'field_support',
                   'field_support_group', 'email', 'contact', 'location']:
         if field in data:
-            set_ops[field] = (data[field] or '').strip()
+            val = _clean_str(data, field)
+            if val is None:
+                return jsonify({'error': 'Invalid value for %s' % field}), 400
+            set_ops[field] = val
 
     if not set_ops:
         return jsonify({'error': 'No changes provided'}), 400
@@ -4469,6 +4558,9 @@ def admin_update_user(user_id):
     if revoke:
         update['$inc'] = {'session_epoch': 1}
     mongo.db.users.update_one({'_id': oid}, update)
+    audit('user_updated', user_id=user_id, username=user.get('username'),
+          fields=sorted(k for k in set_ops if k not in ('password', 'updated_at')),
+          password_changed=bool(password), sessions_revoked=revoke)
     return jsonify({'success': True})
 
 

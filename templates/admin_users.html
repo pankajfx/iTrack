@@ -6,6 +6,7 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <script src="/static/js/secure_fetch.js?v={{ config.STATIC_VERSION }}"></script>
     <title>Admin — User Management</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 32 32%22%3E%3Crect width=%2232%22 height=%2232%22 rx=%227%22 fill=%22%230d9488%22/%3E%3Cpath d=%22M16 7v6M10 19h12M10 19v6M22 19v6M16 13v6%22 stroke=%22white%22 stroke-width=%222.6%22 stroke-linecap=%22round%22 fill=%22none%22/%3E%3C/svg%3E">
     <link rel="stylesheet" href="/static/css/output.css?v={{ config.STATIC_VERSION }}">
     <link rel="stylesheet" href="/static/css/fonts.css?v={{ config.STATIC_VERSION }}">
     <style>
@@ -96,6 +97,13 @@
             <h1 class="text-white text-xl font-bold mt-2">Admin Access</h1>
             <p class="text-gray-400 text-sm mt-1">User Management Portal</p>
         </div>
+        {% if admin_disabled_reason %}
+        <div style="color:#fbbf24;font-size:13px;line-height:1.5;">
+            The admin panel is disabled: {{ admin_disabled_reason }}.<br>
+            Set <code>ADMIN_PASSWORD</code> in <code>.env</code> to at least 12 characters
+            that are not a common password, then restart the app.
+        </div>
+        {% else %}
         <div class="mb-4">
             <label class="text-gray-300 text-xs font-semibold mb-1 block">Admin Password</label>
             <input id="pw-input" type="password" placeholder="Enter password"
@@ -104,6 +112,7 @@
         <div id="pw-error" style="color:#f87171;font-size:12px;margin-bottom:8px;display:none;">Incorrect password. Try again.</div>
         <div id="pw-generic-error" style="color:#f87171;font-size:12px;margin-bottom:8px;display:none;"></div>
         <button id="pw-btn" onclick="submitPw()">Authenticate</button>
+        {% endif %}
     </div>
 </div>
 
@@ -319,6 +328,11 @@
                 </div>
             </div>
 
+            <label id="row-active" class="hidden items-center gap-2 text-sm text-gray-700">
+                <input id="f-active" type="checkbox" class="rounded">
+                Active - clear to lock the account out and end its sessions
+            </label>
+
             <div id="form-error" class="text-red-500 text-xs hidden"></div>
 
             <div class="flex justify-end gap-2 pt-2 border-t">
@@ -383,6 +397,11 @@ async function submitPw() {
             document.getElementById('pw-gate').style.display = 'none';
             document.getElementById('main-page').classList.remove('hidden');
             loadUsers();
+        } else if (r.status === 429 || r.status === 503) {
+            // Locked out, or disabled: show the server's reason, not "incorrect".
+            const d = await r.json().catch(() => ({}));
+            gen.textContent = d.error || 'Admin sign-in unavailable.';
+            gen.style.display = 'block';
         } else {
             err.style.display = 'block';
             document.getElementById('pw-input').value = '';
@@ -426,17 +445,19 @@ function renderTable(users) {
         const zoneRegion = [u.zone, u.region].filter(Boolean).join(' / ') || '—';
         const group = u.field_engineer_group || u.field_support || u.field_support_group || '—';
         const contact = u.email
-            ? `<div class="text-gray-700">${u.email}</div>${u.contact ? `<div class="text-gray-400">${u.contact}</div>` : ''}`
-            : (u.contact || '—');
-        return `<tr data-id="${u._id}" data-role="${u.role}" data-name="${(u.name||'').toLowerCase()}" data-username="${(u.username||'').toLowerCase()}">
-            <td class="px-4 py-3 font-medium text-gray-800">${u.name || '—'}</td>
-            <td class="px-4 py-3 text-gray-500 font-mono text-xs">${u.username || '—'}</td>
-            <td class="px-4 py-3"><span class="badge ${colors}">${label}</span></td>
-            <td class="px-4 py-3 text-gray-500 text-xs">${zoneRegion}</td>
-            <td class="px-4 py-3 text-gray-500 text-xs">${group}</td>
+            ? `<div class="text-gray-700">${esc(u.email)}</div>${u.contact ? `<div class="text-gray-400">${esc(u.contact)}</div>` : ''}`
+            : esc(u.contact || '—');
+        const inactive = u.active === false
+            ? ' <span class="badge bg-red-100 text-red-700">Inactive</span>' : '';
+        return `<tr data-id="${esc(u._id)}" data-role="${esc(u.role)}" data-name="${esc((u.name||'').toLowerCase())}" data-username="${esc((u.username||'').toLowerCase())}">
+            <td class="px-4 py-3 font-medium text-gray-800">${esc(u.name || '—')}${inactive}</td>
+            <td class="px-4 py-3 text-gray-500 font-mono text-xs">${esc(u.username || '—')}</td>
+            <td class="px-4 py-3"><span class="badge ${colors}">${esc(label)}</span></td>
+            <td class="px-4 py-3 text-gray-500 text-xs">${esc(zoneRegion)}</td>
+            <td class="px-4 py-3 text-gray-500 text-xs">${esc(group)}</td>
             <td class="px-4 py-3 text-gray-500 text-xs">${contact}</td>
             <td class="px-4 py-3">
-                <button onclick='openEdit(${JSON.stringify(u)})'
+                <button onclick="openEditById(${escJs(u._id)})"
                         class="text-gray-400 hover:text-teal-600 transition p-1 rounded">
                     <span class="material-symbols-outlined" style="font-size:18px">edit</span>
                 </button>
@@ -459,12 +480,27 @@ function filterTable() {
     renderTable(filtered);
 }
 
+// User fields are data: never interpolate them into HTML raw. escJs() is for a
+// value passed as an argument inside an inline handler, where the browser decodes
+// &#39; back to ' before the JavaScript is parsed.
+function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function escJs(v) { return esc(JSON.stringify(String(v == null ? '' : v))); }
+function openEditById(id) {
+    const u = allUsers.find(x => x._id === id);
+    if (u) openEdit(u);
+}
+
 // ── Modal ────────────────────────────────────────────────────────────────────
 function openAdd() {
     document.getElementById('modal-title').textContent = 'Add User';
     document.getElementById('edit-user-id').value = '';
     document.getElementById('pw-required-star').style.display = '';
     document.getElementById('user-form').reset();
+    document.getElementById('row-active').classList.add('hidden');
+    document.getElementById('row-active').classList.remove('flex');
     hideFormError();
     onRoleChange();
     document.getElementById('user-modal').classList.remove('hidden');
@@ -489,6 +525,9 @@ function openEdit(u) {
     }
     document.getElementById('f-password').value = '';
     document.getElementById('f-password').placeholder = 'Leave blank to keep current';
+    document.getElementById('f-active').checked = u.active !== false;
+    document.getElementById('row-active').classList.remove('hidden');
+    document.getElementById('row-active').classList.add('flex');
 
     document.getElementById('user-modal').classList.remove('hidden');
 }
@@ -523,9 +562,13 @@ function onRoleChange() {
 function generatePassword() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789@#$!';
     let pw = '';
-    const arr = new Uint8Array(10);
-    crypto.getRandomValues(arr);
-    for (const b of arr) pw += chars[b % chars.length];
+    // Rejection sampling: 'byte % chars.length' would favour the first characters.
+    const limit = 256 - (256 % chars.length);
+    while (pw.length < 12) {
+        const arr = new Uint8Array(16);
+        crypto.getRandomValues(arr);
+        for (const b of arr) if (b < limit && pw.length < 12) pw += chars[b % chars.length];
+    }
     document.getElementById('f-password').value = pw;
     document.getElementById('f-password').select();
 }
@@ -546,6 +589,8 @@ async function submitUser(e) {
         const el = document.getElementById('f-' + f);
         if (el) payload[f] = el.value.trim();
     }
+
+    if (isEdit) payload.active = document.getElementById('f-active').checked;
 
     // Validate
     if (!payload.name) { showFormError('Name is required.'); return; }
@@ -600,7 +645,7 @@ function toast(msg, type = 'info') {
 }
 
 // Enter key on password gate
-document.getElementById('pw-input').focus();
+document.getElementById('pw-input')?.focus();   // absent when the panel is disabled
 </script>
 
 <style>

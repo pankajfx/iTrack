@@ -825,5 +825,11 @@
             console.error('Login error:', error);
         }
     });
+
+    // Arrived here because a session ended mid-use (see the fetch wrapper in base.html).
+    if (new URLSearchParams(window.location.search).get('expired')) {
+        window.addEventListener('load', () =>
+            showToast('Your session ended - please sign in again.', 'info'));
+    }
 </script>
 {% endblock %}

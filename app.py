@@ -2,6 +2,7 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from flask_pymongo import PyMongo
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 from datetime import datetime, timezone, timedelta
 from bson import ObjectId
 from bson.errors import InvalidId
@@ -11,6 +12,7 @@ import base64
 import re
 from pymongo.errors import DuplicateKeyError
 import os
+import time
 from functools import wraps
 from dotenv import load_dotenv
 from theme_config import get_active_fe_theme, get_active_noc_theme, get_theme_for_role
@@ -137,6 +139,41 @@ IMAGE_MAX_DIM   = _env_int('IMAGE_MAX_DIM',   _mp['image_max_dim'])
 IMAGE_QUALITY   = _env_int('IMAGE_QUALITY',   _mp['image_quality'])
 CAPTURE_MAX_DIM = _env_int('CAPTURE_MAX_DIM', _mp['capture_max_dim'])
 CAPTURE_QUALITY = _env_float('CAPTURE_QUALITY', _mp['capture_quality'])
+
+
+# ─── Authentication hardening ────────────────────────────────────────────────
+# Failed logins are counted in Mongo (collection login_attempts, TTL-expired), so
+# the limits hold across every worker process and survive restarts. Three
+# counters, all over the same sliding window:
+#   pair     account + client IP  - stops one source guessing one password
+#   account  across all IPs       - caps distributed guessing on one account
+#   ip       across all accounts  - stops one source spraying many accounts
+# Locking on the pair first means an attacker who knows a name (the login page
+# lists them) cannot lock the real user out from a different IP.
+LOGIN_MAX_FAILURES         = _env_int('LOGIN_MAX_FAILURES', 5)
+LOGIN_ACCOUNT_MAX_FAILURES = _env_int('LOGIN_ACCOUNT_MAX_FAILURES', 20)
+LOGIN_IP_MAX_FAILURES      = _env_int('LOGIN_IP_MAX_FAILURES', 30)
+LOGIN_WINDOW_MINUTES       = _env_int('LOGIN_WINDOW_MINUTES', 15)
+
+# Sessions used to be browser-session cookies with no server-side expiry, and a
+# deleted user kept access for as long as their browser stayed open (field
+# phones rarely close browsers). Now: a sliding lifetime, and every request
+# re-checks that the account still exists, is active, and has not had its
+# sessions revoked (session_epoch is bumped on password change/deactivation).
+SESSION_LIFETIME_HOURS = _env_int('SESSION_LIFETIME_HOURS', 12)
+USER_CHECK_TTL_SECONDS = _env_int('USER_CHECK_TTL_SECONDS', 30)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=SESSION_LIFETIME_HOURS)
+app.config['SESSION_REFRESH_EACH_REQUEST'] = True
+
+# Behind Caddy/Nginx every request arrives from 127.0.0.1. Without ProxyFix the
+# per-IP login limits would count every user as one client, and HTTPS would be
+# invisible to the app. Set to the number of proxies in front of the app (1 for
+# the standard single reverse proxy). Leave 0 when clients connect directly -
+# trusting X-Forwarded-* from untrusted clients lets them spoof their IP.
+TRUST_PROXY_HOPS = _env_int('TRUST_PROXY_HOPS', 0)
+if TRUST_PROXY_HOPS > 0:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=TRUST_PROXY_HOPS, x_proto=TRUST_PROXY_HOPS,
+                            x_host=TRUST_PROXY_HOPS, x_port=TRUST_PROXY_HOPS)
 
 
 # ─── Tracker status constants ────────────────────────────────────────────────
@@ -357,13 +394,141 @@ def handle_invalid_object_id(_e):
     return jsonify({'error': 'Not found'}), 404
 
 
+# ─── Login throttling ────────────────────────────────────────────────────────
+_LOOPBACK = {'127.0.0.1', '::1', 'localhost'}
+
+# Checked against when an account does not exist, so a missing account and a
+# wrong password cost the same time - otherwise latency reveals which names exist.
+_DUMMY_PASSWORD_HASH = generate_password_hash('placeholder-for-constant-time-login')
+
+
+def _throttle_keys(account_key):
+    ip = request.remote_addr or 'unknown'
+    keys = {'pair': 'pair:%s|%s' % (account_key, ip), 'account': 'acct:' + account_key}
+    # A loopback address means the real client is behind an unconfigured local
+    # proxy; counting it would pool every user into one bucket.
+    if ip not in _LOOPBACK:
+        keys['ip'] = 'ip:' + ip
+    return keys
+
+
+def login_lockout_seconds(account_key):
+    """Seconds until this caller may try `account_key` again (0 = allowed)."""
+    now = get_utc_now()
+    window = timedelta(minutes=LOGIN_WINDOW_MINUTES)
+    limits = {'pair': LOGIN_MAX_FAILURES, 'account': LOGIN_ACCOUNT_MAX_FAILURES,
+              'ip': LOGIN_IP_MAX_FAILURES}
+    wait = 0.0
+    for kind, key in _throttle_keys(account_key).items():
+        recent = [d['at'] for d in mongo.db.login_attempts.find(
+            {'key': key, 'at': {'$gt': now - window}}, {'at': 1}).sort('at', 1)]
+        if len(recent) >= limits[kind]:
+            # Allowed again once enough of the oldest failures leave the window.
+            release = recent[len(recent) - limits[kind]] + window
+            wait = max(wait, (release - now).total_seconds())
+    return wait
+
+
+def record_login_failure(account_key):
+    now = get_utc_now()
+    mongo.db.login_attempts.insert_many(
+        [{'key': k, 'at': now} for k in _throttle_keys(account_key).values()])
+
+
+def clear_login_failures(account_key):
+    keys = _throttle_keys(account_key)
+    mongo.db.login_attempts.delete_many({'key': {'$in': [keys['pair'], keys['account']]}})
+
+
+def throttled_response(wait):
+    minutes = max(1, int(round(wait / 60.0)))
+    resp = jsonify({'success': False,
+                    'message': 'Too many failed attempts. Try again in %d minute%s.'
+                               % (minutes, '' if minutes == 1 else 's')})
+    resp.status_code = 429
+    resp.headers['Retry-After'] = str(int(wait) + 1)
+    return resp
+
+
+def ensure_security_indexes():
+    """TTL cleanup for login_attempts plus the lookup index; idempotent."""
+    try:
+        mongo.db.login_attempts.create_index([('key', 1), ('at', 1)], name='login_attempts_key_at')
+        mongo.db.login_attempts.create_index('at', name='login_attempts_ttl',
+                                             expireAfterSeconds=max(LOGIN_WINDOW_MINUTES, 60) * 60)
+    except Exception as exc:                         # never block startup on this
+        print(f"[startup] security index setup skipped: {exc}")
+
+
+# ─── Session validity ────────────────────────────────────────────────────────
+_user_state_cache = {}      # user_id -> (checked_at, session_epoch or None if invalid)
+
+
+def session_user_valid():
+    """The session's user still exists, is active, and has not been revoked.
+
+    Cached per process for USER_CHECK_TTL_SECONDS, so revocation takes effect
+    within that many seconds on every worker without a database hit per request.
+    """
+    uid = session.get('user_id')
+    if not uid:
+        return False
+    now = time.monotonic()
+    hit = _user_state_cache.get(uid)
+    if hit and now - hit[0] < USER_CHECK_TTL_SECONDS:
+        epoch = hit[1]
+    else:
+        oid = parse_oid(uid)
+        doc = mongo.db.users.find_one({'_id': oid}, {'active': 1, 'session_epoch': 1}) if oid else None
+        epoch = None if (not doc or doc.get('active') is False) else doc.get('session_epoch', 0)
+        if len(_user_state_cache) > 50000:
+            _user_state_cache.clear()
+        _user_state_cache[uid] = (now, epoch)
+    return epoch is not None and epoch == session.get('epoch', 0)
+
+
+def _wants_json():
+    return request.path.startswith(('/api/', '/admin/api/')) or request.is_json
+
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
+        if 'user_id' not in session or not session_user_valid():
+            session.clear()
+            # API callers get a 401 they can act on; a redirect used to hand
+            # fetch() an HTML login page that then failed to parse as JSON.
+            if _wants_json():
+                resp = jsonify({'error': 'Authentication required', 'login': url_for('login')})
+                resp.status_code = 401
+                resp.headers['X-Auth-Required'] = '1'
+                return resp
             return redirect(url_for('login'))
         return f(*args, **kwargs)
     return decorated_function
+
+
+# ─── Request guards ──────────────────────────────────────────────────────────
+def _has_operator_keys(value, depth=0):
+    if depth > 32:
+        return True                                  # absurd nesting is refused too
+    if isinstance(value, dict):
+        return any((isinstance(k, str) and k.startswith('$')) or _has_operator_keys(v, depth + 1)
+                   for k, v in value.items())
+    if isinstance(value, list):
+        return any(_has_operator_keys(v, depth + 1) for v in value)
+    return False
+
+
+@app.before_request
+def reject_query_operators():
+    """No legitimate payload carries a key starting with '$'. Refusing them
+    everywhere closes NoSQL operator injection - {"$regex": ...} in place of a
+    name - for every endpoint at once, including ones written later."""
+    if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') and request.is_json:
+        data = request.get_json(silent=True)
+        if data is not None and _has_operator_keys(data):
+            return jsonify({'error': 'Invalid request'}), 400
 
 
 @app.route('/api/media/<file_id>')
@@ -611,39 +776,54 @@ def api_get_noc_users_for_reassignment():
     return jsonify({'noc_users': noc_users})
 
 
+_LOGIN_FIELDS = {
+    ROLE_FE:        (('name', 'fe_name'), ('field_engineer_group', 'fe_group')),
+    ROLE_FEG:       (('name', 'feg_name'),),
+    ROLE_FS:        (('name', 'fs_name'),),
+    ROLE_FSG:       (('name', 'fsg_name'),),
+    ROLE_NS:        (('username', 'noc_username'),),
+    ROLE_NSG:       (('username', 'noc_username'),),
+    ROLE_ANALYTICS: (('username', 'username'),),
+}
+
+
 @app.route('/api/auth/login', methods=['POST'])
 def api_login():
-    data = request.json
+    data = request.get_json(silent=True) or {}
     role = data.get('role')
     password = data.get('password')
-
-    query = {'role': role}
-
-    if role == ROLE_FE:
-        query['name'] = data.get('fe_name')
-        query['field_engineer_group'] = data.get('fe_group')
-    elif role == ROLE_FEG:
-        query['name'] = data.get('feg_name')
-        # Removed state query - FEG no longer has state field
-    elif role == ROLE_FS:
-        query['name'] = data.get('fs_name')
-    elif role == ROLE_FSG:
-        query['name'] = data.get('fsg_name')
-    elif role in NOC_ROLES:
-        query['username'] = data.get('noc_username')
-    elif role == ROLE_ANALYTICS:
-        query['username'] = data.get('username', 'analytics')
-    else:
+    if role not in _LOGIN_FIELDS:
         return jsonify({'success': False, 'message': 'Invalid role'}), 400
 
+    # Only non-empty strings reach the query. An object such as {"$regex": "^Dev"}
+    # used to be spliced straight into find_one() - NoSQL operator injection.
+    query = {'role': role}
+    for field, param in _LOGIN_FIELDS[role]:
+        value = data.get(param, 'analytics' if param == 'username' else None)
+        if not isinstance(value, str) or not value.strip() or len(value) > 200:
+            return jsonify({'success': False, 'message': 'Invalid credentials'}), 400
+        query[field] = value
+    if not isinstance(password, str) or not password or len(password) > 200:
+        return jsonify({'success': False, 'message': 'Invalid credentials'}), 400
+
+    account_key = role + ':' + '|'.join(str(query[f]) for f, _ in _LOGIN_FIELDS[role])
+    wait = login_lockout_seconds(account_key)
+    if wait > 0:
+        return throttled_response(wait)
+
     user = mongo.db.users.find_one(query)
-    if not user:
-        return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
-    
-    # Verify password using Werkzeug's check_password_hash for hashed passwords
-    if not check_password_hash(user.get('password', ''), password):
+    password_ok = check_password_hash(user.get('password') or _DUMMY_PASSWORD_HASH if user
+                                      else _DUMMY_PASSWORD_HASH, password)
+    if not user or not password_ok or user.get('active') is False:
+        record_login_failure(account_key)
         return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
 
+    clear_login_failures(account_key)
+    # A fresh session per login: nothing from a previous identity (an admin
+    # flag, a CSRF token) carries over.
+    session.clear()
+    session.permanent = True
+    session['epoch'] = user.get('session_epoch', 0)
     session['user_id'] = str(user['_id'])
     session['username'] = user.get('username', user.get('name'))
     session['role'] = role
@@ -681,19 +861,6 @@ def api_login():
 def api_logout():
     session.clear()
     return jsonify({'success': True})
-
-
-@app.route('/api/debug/time')
-def api_debug_time():
-    import time
-    now_utc = get_utc_now()
-    now_local = datetime.now()
-    return jsonify({
-        'server_time_utc': now_utc.isoformat(),
-        'server_time_local': now_local.isoformat(),
-        'system_timezone_offset_seconds': time.timezone,
-        'note': 'All times stored in UTC; convert to IST in frontend (+5:30)'
-    })
 
 
 # ─── Tracker Query APIs ─────────────────────────────────────────────────────
@@ -1401,7 +1568,11 @@ def api_create_tracker():
     if session.get('role') != ROLE_FE:
         return jsonify({'success': False, 'message': 'Only Field Engineers can create trackers'}), 403
 
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    for field, limit in (('sdwan_id', 64), ('customer', 200), ('fe_phone', 32)):
+        value = data.get(field)
+        if not isinstance(value, str) or not value.strip() or len(value) > limit:
+            return jsonify({'success': False, 'message': 'Invalid or missing %s' % field}), 400
     existing = mongo.db.trackers.find_one({'sdwan_id': data['sdwan_id']})
     if existing:
         return jsonify({'success': False, 'message': 'SDWAN ID already exists',
@@ -4078,10 +4249,18 @@ def admin_update_user(user_id):
             return jsonify({'error': f'Username "{username}" already exists'}), 409
         set_ops['username'] = username
 
-    # Password — only update if provided
+    # Password - only update if provided. Changing it revokes every existing
+    # session for the account (session_user_valid compares session_epoch).
     password = data.get('password', '')
+    revoke = False
     if password:
         set_ops['password'] = generate_password_hash(password)
+        revoke = True
+
+    # Deactivation locks the account out of login and ends its sessions.
+    if 'active' in data:
+        set_ops['active'] = bool(data['active'])
+        revoke = revoke or not set_ops['active']
 
     # Optional fields
     for field in ['zone', 'region', 'state', 'field_engineer_group', 'field_support',
@@ -4093,7 +4272,10 @@ def admin_update_user(user_id):
         return jsonify({'error': 'No changes provided'}), 400
 
     set_ops['updated_at'] = get_utc_now()
-    mongo.db.users.update_one({'_id': oid}, {'$set': set_ops})
+    update = {'$set': set_ops}
+    if revoke:
+        update['$inc'] = {'session_epoch': 1}
+    mongo.db.users.update_one({'_id': oid}, update)
     return jsonify({'success': True})
 
 
@@ -4222,6 +4404,7 @@ def broadcast_to_user(user_id, event_type, data):
 # under gunicorn too - not only when this file is run directly.
 with app.app_context():
     bootstrap_tracker_counters()
+    ensure_security_indexes()
 
 
 if __name__ == '__main__':

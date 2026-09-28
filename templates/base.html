@@ -22,6 +22,25 @@
             window._socketCallbacks.push(fn);
             if (window._socketReady) fn();
         };
+
+        // fetch() wrapper - cross-cutting request behaviour for every page.
+        // A 401 marked X-Auth-Required means the session ended (expired, revoked,
+        // or the account was removed). Go to the login page instead of leaving the
+        // page half-rendered with "Failed to load" toasts. The login form's own
+        // wrong-password 401 carries no marker, so it never redirects.
+        (function () {
+            var nativeFetch = window.fetch.bind(window);
+            window.fetch = function (input, init) {
+                return nativeFetch(input, init).then(function (res) {
+                    if (res.status === 401 && res.headers.get('X-Auth-Required') === '1'
+                            && !window.__redirectingToLogin) {
+                        window.__redirectingToLogin = true;
+                        window.location.href = '/login?expired=1';
+                    }
+                    return res;
+                });
+            };
+        })();
     </script>
 
     <!-- Preload critical fonts -->

@@ -164,11 +164,16 @@ def read_excel_rows():
 
 
 def row_credentials(row):
-    """(username, plaintext password) for a sheet row — password defaults to username."""
+    """(username, plaintext password) for a sheet row; password is None if blank.
+
+    A blank password used to default to the username - a credential anyone
+    who can read the login page's name list could guess. Rows without a
+    password are now skipped and reported instead.
+    """
     username = str(row.get('Username', '')).strip()
     raw = row.get('Password')
-    password = str(raw).strip() if raw is not None else username
-    return username, password
+    password = str(raw).strip() if raw is not None else ''
+    return username, (password or None)
 
 
 # ── Build MongoDB documents ───────────────────────────────────────────────────
@@ -194,6 +199,9 @@ def build_user_docs(rows):
             continue
 
         username, password_plain = row_credentials(row)
+        if not password_plain:
+            skipped.append(f"No password in the sheet - username: {username}")
+            continue
         name           = str(row.get('Name', username)).strip()
         zone           = str(row['Zone']).strip() if row.get('Zone') else 'India'
         region         = str(row['Region']).strip() if row.get('Region') else None
@@ -259,7 +267,7 @@ def reset_passwords(db, rows, dry_run=False):
 
     for row in rows:
         username, password_plain = row_credentials(row)
-        if not username:
+        if not username or not password_plain:
             continue
 
         user = db.users.find_one({'username': username}, {'_id': 1, 'password': 1})

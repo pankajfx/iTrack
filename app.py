@@ -12,7 +12,10 @@ import base64
 import re
 from pymongo.errors import DuplicateKeyError
 import os
+import hmac
+import secrets
 import time
+from urllib.parse import urlparse
 from functools import wraps
 from dotenv import load_dotenv
 from theme_config import get_active_fe_theme, get_active_noc_theme, get_theme_for_role
@@ -533,6 +536,76 @@ def _has_operator_keys(value, depth=0):
     if isinstance(value, list):
         return any(_has_operator_keys(v, depth + 1) for v in value)
     return False
+
+
+# ─── CSRF ────────────────────────────────────────────────────────────────────
+# Session cookies ride along on requests another site makes, so every
+# state-changing request must prove it came from one of our pages:
+#   1. X-CSRF-Token must equal the per-session token. Pages carry it in
+#      <meta name="csrf-token">, and the fetch() wrapper in base.html attaches it
+#      to every same-origin POST/PUT/PATCH/DELETE - no page needs to change.
+#   2. An Origin (or Referer) header naming another host is refused outright.
+#      Host-only comparison: behind a TLS-terminating proxy the scheme differs
+#      (https outside, http inside) unless TRUST_PROXY_HOPS is set, and Caddy
+#      and the generated Nginx config both forward Host. PUBLIC_ORIGINS adds
+#      extra allowed origins, e.g. a second hostname for the same service.
+# /socket.io/ never reaches these hooks (Engine.IO answers it first); sockets are
+# protected by the origin check configured on the SocketIO server instead.
+PUBLIC_ORIGINS = {o.strip().rstrip('/') for o in os.environ.get('PUBLIC_ORIGINS', '').split(',') if o.strip()}
+_UNSAFE_METHODS = ('POST', 'PUT', 'PATCH', 'DELETE')
+
+
+def csrf_token():
+    token = session.get('csrf_token')
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session['csrf_token'] = token
+    return token
+
+
+app.jinja_env.globals['csrf_token'] = csrf_token
+
+
+def _origin_allowed(value):
+    if not value:
+        return True                                  # absent: the token decides
+    try:
+        u = urlparse(value)
+    except ValueError:
+        return False
+    if '%s://%s' % (u.scheme, u.netloc) in PUBLIC_ORIGINS:
+        return True
+    return bool(u.netloc) and u.netloc.lower() == (request.host or '').lower()
+
+
+def _csrf_failure(reason):
+    resp = jsonify({'error': 'Request blocked: %s. Reload the page and try again.' % reason})
+    resp.status_code = 403
+    resp.headers['X-CSRF-Failed'] = '1'
+    return resp
+
+
+@app.before_request
+def csrf_protect():
+    if request.method not in _UNSAFE_METHODS:
+        return None
+    origin = request.headers.get('Origin')
+    if origin is not None and not _origin_allowed(origin):
+        return _csrf_failure('cross-site request')
+    if origin is None and not _origin_allowed(request.headers.get('Referer')):
+        return _csrf_failure('cross-site request')
+    sent = request.headers.get('X-CSRF-Token', '')
+    expected = session.get('csrf_token', '')
+    if not expected or not sent or not hmac.compare_digest(sent, expected):
+        return _csrf_failure('missing or stale security token')
+    return None
+
+
+@app.route('/api/csrf-token')
+def api_csrf_token():
+    """Fresh token for a page whose token went stale (e.g. the user signed in
+    again in another tab). Readable only by same-origin scripts - no CORS."""
+    return jsonify({'token': csrf_token()})
 
 
 @app.before_request

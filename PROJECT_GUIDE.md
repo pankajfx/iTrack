@@ -14,17 +14,18 @@
 | 2 | [Installation workflow & status machine](#2-installation-workflow--status-machine) | statuses, transitions, workflow logic |
 | 3 | [Architecture & tech stack](#3-architecture--tech-stack) | dependencies, how pieces fit |
 | 4 | [Data model](#4-data-model) | MongoDB collections, tracker shape, indexes |
-| 5 | [Real-time (Socket.IO)](#5-real-time-socketio) | live updates, rooms, broadcasts |
+| 5 | [Real-time (Socket.IO) — architecture & robustness](#5-real-time-socketio--architecture--robustness) | live updates, rooms, reconnects, proxies, socket capacity |
 | 6 | [API surface](#6-api-surface) | routes, endpoints, request/response |
 | 7 | [Conventions & code map](#7-conventions--code-map) | timestamps, events, naming, `app.py` layout |
-| 8 | [Security — gaps & missing controls](#8-security--gaps--missing-controls) | auth, hardening, before production |
-| 9 | [Windows-server production setup & caveats](#9-windows-server-production-setup--caveats) | deploying/running on the server |
+| 8 | [Security — controls, production settings & residual risks](#8-security--controls-production-settings--residual-risks) | auth, sessions, CSRF, headers, go-live checklist |
+| 9 | [Production deployment — Windows (primary) & Linux](#9-production-deployment--windows-primary--linux) | serving model, service, proxy, workers & sizing, gunicorn, operations |
 | 10 | [Mobile-first & responsive](#10-mobile-first--responsive) | any UI/template/CSS work |
 | 11 | [Pros / cons / loopholes](#11-pros--cons--loopholes) | quick health snapshot |
 | 12 | [One-time scripts](#12-one-time-scripts) | seeding, indexes, ops console |
 | 13 | [Dev commands & environment variables](#13-dev-commands--environment-variables) | running locally, config |
 | 14 | [Known issues & improvement roadmap](#14-known-issues--improvement-roadmap) | what to build/fix next |
 | 15 | [Performance, scale & the media pipeline](#15-performance-scale--the-media-pipeline) | slowness, load, concurrency, image/audio sizing |
+| 16 | [Background jobs — Celery, APScheduler & scheduled maintenance](#16-background-jobs--celery-apscheduler--scheduled-maintenance) | periodic tasks, job queues, backups, cleanup |
 
 ---
 
@@ -96,22 +97,22 @@ Legacy statuses kept for old docs: `ztp_pull_verified`, `ztp_pull_done_by_noc`.
 
 | Layer | Technology |
 |---|---|
-| Backend | Flask 3.0, Flask-SocketIO 5.3.6 (`async_mode='threading'`), Python |
+| Backend | Flask 3.0, Flask-SocketIO 5.3.6, Python 3.11. Serving: **gevent** in production, threading in development ([§9](#9-production-deployment--windows-primary--linux)) |
 | Database | MongoDB via PyMongo 4.6.1 + Flask-PyMongo 2.3.0 |
-| Auth | Flask server-side sessions + Werkzeug password hashing (no JWT) |
+| Auth | Signed-cookie Flask sessions, revocable server-side (`session_epoch`); Werkzeug scrypt password hashing; CSRF tokens (no JWT) ([§8](#8-security--controls-production-settings--residual-risks)) |
 | Frontend CSS | Tailwind 3.4.1, **pre-compiled** to `static/css/output.css` |
-| Real-time | Socket.IO 4.7.2 client, **self-hosted** ([static/js/vendor/socket.io.min.js](static/js/vendor/socket.io.min.js), loaded at [base.html:537](templates/base.html#L537)) + REST fallback |
+| Real-time | Socket.IO 4.7.2 client, **self-hosted** ([static/js/vendor/socket.io.min.js](static/js/vendor/socket.io.min.js), loaded at [base.html:911](templates/base.html#L911)); one shared socket per page, REST catch-up after any gap ([§5](#5-real-time-socketio--architecture--robustness)) |
 | Icons | Material Symbols (self-hosted woff2). **Font Awesome is CSS/emoji-emulated** — no FA font files are served (the old `tech.md` claim of an FA 7.2.0 dependency is inaccurate). |
 | Fonts | Inter, Manrope, Outfit, Fjalla One — all **self-hosted** variable woff2/ttf in `static/fonts/`, declared in `static/css/fonts.css`. No Google Fonts requests. |
 | Charts | Chart.js 4.4.0 + chartjs-adapter-date-fns + hammerjs + chartjs-plugin-zoom, all **self-hosted** in `static/js/vendor/` (analytics dashboard) |
-| Images | Pillow (chat upload processing) |
+| Images & media | Pillow (chat photo re-encode, off the event loop); files in GridFS, served by `/api/media/<id>` |
 | Excel | openpyxl (analytics export + user seeding) |
 | Templates | Jinja2 |
 
-**Single-file backend:** all routes + business logic live in `app.py` (~3,442 lines). See the section map in [§7](#7-conventions--code-map).
+**Single-file backend:** all routes + business logic live in `app.py` (~4,850 lines). See the section map in [§7](#7-conventions--code-map).
 
 **Templates (verified current set):** `base.html`, `login.html`, `theme_styles.html`, `fe_dashboard.html`, `fe_new_installation.html`, `fe_tracker_detail.html`, `noc_dashboard.html`, `noc_tracker_detail.html`, `analytics_dashboard_v1.html`, `chat_component.html`, `admin_users.html`.
-Only JS asset: `static/js/realtime_handler.js`. (Old docs referenced `ztp_component.html`, `static/fontawesome-css/`, `static/webfonts/` — none of these are present/used.)
+Own JS: `static/js/secure_fetch.js` (loaded first by `base.html`; adds the CSRF header to every state-changing `fetch` and sends expired sessions to the login page). `static/js/realtime_handler.js` is legacy and no template loads it. (Old docs referenced `ztp_component.html`, `static/fontawesome-css/`, `static/webfonts/` — none of these are present/used.)
 
 ---
 
@@ -121,9 +122,13 @@ MongoDB DB: `sdwan_tracker`. Collections:
 
 - **`users`** — accounts with role + hierarchy fields (`field_engineer_group`, `field_support`, `region`, `zone`, `state`, etc.). **This is the collection the app authenticates against.**
 - **`trackers`** — installation docs with embedded sub-documents (below).
-- **`chat_messages`** — FE-NS coordination messages (attachments stored inline as base64 data URLs — see [§8](#8-security--gaps--missing-controls) and [§14](#14-known-issues--improvement-roadmap)).
+- **`chat_messages`** — FE-NS coordination messages. Photos and voice notes live in GridFS and are referenced by id; the API hands out `/api/media/<id>` URLs ([§15.4](#154-the-media-pipeline--why-the-same-photo-has-three-different-sizes)).
 - **`predefined_reasons`** — dropdown options for SIM/ZTP/HSO failures and delay tags (seeded by `init_db.py`).
-- **`audit_logs`**, **`notifications`** — audit trail & user notifications.
+- **`audit_logs`** — append-only record of admin sign-ins and user changes (never passwords); expires after `AUDIT_RETENTION_DAYS`.
+- **`notifications`** — user notifications.
+- **`login_attempts`** — failed sign-ins, for throttling; expires automatically ([§8](#8-security--controls-production-settings--residual-risks)).
+- **`counters`** — the atomic per-year `tracker_id` sequence.
+- **`fs.files` / `fs.chunks`** — GridFS media; each file's `metadata.tracker_id` decides who may fetch it.
 
 ### Tracker embedded sub-documents
 `fe`, `sim` (`sim1`/`sim2` with `attempts[]`, `failure_reason`), `router`, `ztp` (`performed_by`, `failure_reason`, `root_cause_of_initial_failure`), `hso` (`attempts[]`), `site_verification`, `reassignment_request`, `events[]`, and **`stage_timestamps`** (flat KPI timestamps stamped on first occurrence of each stage — powers analytics without scanning `events[]`). Duration math lives in `calculate_stage_times()` [app.py:2490](app.py#L2490).
@@ -135,15 +140,80 @@ The **canonical** index setup is `scripts/create_indexes.py` (idempotent; covers
 
 ---
 
-## 5. Real-time (Socket.IO)
+## 5. Real-time (Socket.IO) — architecture & robustness
 
-- **Rooms:** `tracker_{id}` (viewers of one tracker), `dashboard_{role}` (a role's dashboard), `user_{user_id}` (personal notifications).
-- **Client readiness pattern:** `window.onSocketReady(fn)` (defined in `<head>`, [base.html:19](templates/base.html#L19)) queues callbacks and **re-fires them on every reconnect**, so room joins are automatically re-issued after a network blip. All templates use this instead of checking `typeof socket`.
-- **Join emits include `user_id`** (e.g. [noc_dashboard.html:1247](templates/noc_dashboard.html#L1247)), so `broadcast_to_user()` reaches the personal room.
-- **Broadcast helpers** ([app.py:3378-3433](app.py#L3378)): `broadcast_tracker_update` (emits `tracker_update`, **includes the full serialized tracker** when `SOCKET_INCLUDE_FULL_DATA` and mode ∈ {socket, hybrid}), `broadcast_chat_message`, `broadcast_dashboard_update`, `broadcast_to_user`.
-- **Fallback:** `REALTIME_MODE` (`socket` | `api` | `hybrid`, default `hybrid`) controls whether the client relies on the socket payload or falls back to a REST `loadTracker()`.
+**Feasibility verdict:** Socket.IO is the right transport for this app and is production-ready on the Windows server. One gevent process held 300 authenticated live sockets with ~100 dashboard requests/s on top ([§9.5](#95-capacity--sizing--how-many-workers)), and pages recover from a 45-second server outage on their own. The design rule that makes it robust: **the socket is a fast signal; the REST API is the source of truth.** Anything a page may have missed is re-fetched, so no event is ever the only copy of a change.
 
-> The historical "real-time is broken" issues in the old `ANALYSIS.md` (missing `user_id`, no reconnect rejoin, dead `realtime_handler.js`/`tracker_update` listeners, `debug=True`) are **already fixed** in the current code. The one still-open real-time item: dashboards do a **full list reload** on any `dashboard_update` (`debouncedReload`) rather than a targeted card update — see [§14](#14-known-issues--improvement-roadmap).
+### 5.1 Rooms and events
+
+Every socket belongs to a signed-in user ([`handle_connect`, app.py:4685](app.py#L4685)). Rooms are joined on the server's authority, never the client's.
+
+| Room | Who is in it | Authorized by | Events delivered |
+|---|---|---|---|
+| `user_<id>` | every socket of that user, joined at connect | the session | `session_ended` (account revoked), `user_notification` |
+| `tracker_<id>` | tracker detail pages (`join_tracker`) | `visible_tracker()` — the same rule as the REST API ([app.py:1341](app.py#L1341)) | `tracker_update` (with the full, media-resolved tracker when `SOCKET_INCLUDE_FULL_DATA`), `new_chat_message` (media as `/api/media` URLs, never bytes) |
+| `dashboard_<role>` | dashboards (`join_dashboard`) | the role in the session — a role sent by the client is ignored | `dashboard_update` carrying only `{event_type, tracker_id}`; each dashboard re-queries its own scoped data |
+
+Broadcast helpers: `broadcast_tracker_update`, `broadcast_chat_message`, `broadcast_dashboard_update`, `broadcast_to_user` ([app.py:4741-4810](app.py#L4741)).
+
+Connection-level protections: sockets from other origins are refused (`CORS_ORIGINS`, default same-origin). A refused connection carries the reason `auth_required`, which sends the page to `/login?expired=1`. Clients may send at most 64 KB per message. When an admin deactivates a user or changes their password, `session_ended` is emitted at once, and a sweep every `SOCKET_SESSION_SWEEP_SECONDS` (60, [app.py:4661](app.py#L4661)) disconnects any socket whose session was revoked.
+
+### 5.2 Delivery guarantees — and how the app closes the gaps
+
+Socket.IO delivers **at most once, in order, while connected**. Nothing is queued for a disconnected client and the server keeps no replay log, so the app never relies on a single event:
+
+| Situation | What repairs it |
+|---|---|
+| Socket dropped and came back (network blip, server restart, deploy) | `window.onSocketReconnect(fn)` re-runs each page's loader on every re-connect: chat `loadChat` (incremental, `?since=`, [chat_component.html:217](templates/chat_component.html#L217)), tracker pages `loadTracker`, dashboards `loadTrackers` / `loadInstallations` and the transfer requests. Rooms are re-joined by the `onSocketReady` callbacks, which run on every connect. |
+| Phone locked or tab in the background (mobile browsers freeze it) | On return the page reconnects at once instead of waiting out the backoff, and re-runs the catch-up if it was hidden for more than 30 s, even when the socket never noticed a disconnect ([base.html:1018](templates/base.html#L1018)). |
+| An event lost without any disconnect (rare) | Safety-net refresh: chat 60 s, dashboards 120 s, tracker detail 15 s (NOC) / 30 s (FE). |
+| The same chat message arrives live **and** through catch-up | Rendered once: messages are de-duplicated by `_id`. |
+
+Acknowledged delivery with server-side replay was considered and rejected: it needs a persistent per-client cursor and gains nothing over the incremental REST catch-up for this workload.
+
+### 5.3 Client connection policy ([base.html:961](templates/base.html#L961))
+
+- **One socket per page** (`window.socket`), shared by the page and the chat component. There used to be two.
+- **Long-polling first, then upgrade to WebSocket.** The 4.7.2 client does not fall back from a failed WebSocket to polling, so WebSocket-first meant *no live updates at all* behind a proxy that does not pass upgrades. Polling works through anything; the upgrade happens wherever the proxy allows it.
+- **Reconnect forever**, backoff 1 s → 15 s with ±50 % jitter so a server restart does not bring every client back in the same second; 20 s connect timeout. The old client gave up after 10 attempts (~30 s) and stayed offline until reloaded.
+- The browser's `online` event (network back) reconnects immediately.
+- A **"Reconnecting…" pill** ([base.html:400](templates/base.html#L400)) shows whenever the socket is down.
+- Only signed-in pages open a socket; the login page opens none.
+
+### 5.4 Server side: heartbeat, proxies, processes
+
+- **Heartbeat:** the server pings every `SOCKETIO_PING_INTERVAL` (25 s) and drops a client that stays silent for `SOCKETIO_PING_TIMEOUT` (20 s) more ([app.py:142](app.py#L142)). A reverse proxy must allow idle connections longer than the interval: the Nginx config generated by the ops console uses `proxy_read_timeout 120s`; Caddy has no idle limit on WebSockets.
+- **Proxies** must pass the WebSocket upgrade (Caddy: automatic; Nginx: `Upgrade`/`Connection` headers, generated by the ops console) and forward `Host`, which the origin checks compare against. If the upgrade is blocked, clients stay on long-polling: still live, just more requests.
+- **Serving mode:** gevent in production — one process, one event loop for HTTP and every socket ([§9](#9-production-deployment--windows-primary--linux)). Threading mode spends an OS thread per connection (1,213 threads at 300 sockets).
+- **More than one process** needs a message queue (`SOCKETIO_MESSAGE_QUEUE`, Redis) so an emit in one process reaches clients held by another, and **sticky sessions** at the proxy, because a Socket.IO session lives in the process that opened it. See [§9.6](#96-scaling-out--more-than-one-process).
+
+### 5.5 Measured behaviour (2026-09-28, real Chrome, throwaway database)
+
+| Scenario | Result |
+|---|---|
+| 45 s server outage | **Before:** the page never reconnected. **After:** reconnected 10.5 s after the server came back (backoff), showed the message sent while it was offline without a reload, and received new messages live. |
+| 12 s outage | Reconnected 0.5 s after the server came back. |
+| Chat NOC → FE and FE → NOC | Arrives live, exactly once on each side. |
+| Admin deactivates a signed-in user | Their open page goes to the login screen in 0.1–0.3 s. |
+| Live `tracker_update` re-render | Photos still load (media resolved to `/api/media` URLs). |
+| 300 sockets in one gevent process | 12 OS threads, 112 MB; one chat message reached all 300 in ≤ 188 ms. |
+
+### 5.6 Configuration
+
+| Var | Default | Effect |
+|---|---|---|
+| `REALTIME_MODE` | `hybrid` | `socket` \| `api` \| `hybrid`: whether pages use the socket payload or re-fetch over REST |
+| `SOCKET_TIMEOUT` | `2000` | ms the client waits for a socket update before falling back to REST |
+| `SOCKET_INCLUDE_FULL_DATA` | `true` | include the full tracker in `tracker_update` |
+| `SOCKETIO_PING_INTERVAL` / `SOCKETIO_PING_TIMEOUT` | `25` / `20` | heartbeat, seconds |
+| `SOCKET_SESSION_SWEEP_SECONDS` | `60` | how often sockets of revoked sessions are disconnected |
+| `CORS_ORIGINS` | *(same origin)* | comma-separated origins allowed to open sockets. A list **replaces** the same-origin default, so include the site's own origin; `*` opens sockets to any website (don't) |
+| `SOCKETIO_MESSAGE_QUEUE` | *(none)* | `redis://…`, required before running more than one process |
+
+### 5.7 Known limits
+
+- Room membership is checked when a page joins. A user who loses access to a tracker *while viewing it* (for example, it is transferred away) keeps receiving that tracker's live updates until the page is closed or the socket reconnects. The REST API refuses them immediately.
+- `dashboard_update` makes a dashboard reload its current page of results rather than patch one card. That is cheap now that lists are paged ([§14](#14-known-issues--improvement-roadmap)).
 
 ---
 
@@ -151,9 +221,10 @@ The **canonical** index setup is `scripts/create_indexes.py` (idempotent; covers
 
 `app.py` route groups (see [§7](#7-conventions--code-map) for the section map):
 
+- **Infrastructure:** `GET /healthz` (no sign-in; up/down plus a database ping, for proxies and monitors), `GET /api/csrf-token` (a fresh CSRF token for the fetch wrapper), `GET /api/media/<id>` (GridFS media, authorized per tracker).
 - **Page routes:** `/`, `/login`, `/fe/*`, `/noc/*`, `/analytics/dashboard`, `/admin`; legacy redirects `/franchise/*`, `/field_support*/*`.
-- **Auth & login enumeration:** `POST /api/auth/login`, `POST /api/auth/logout`, and unauthenticated `GET /api/login/*` dropdown-population endpoints (see the enumeration note in [§8](#8-security--gaps--missing-controls)).
-- **Tracker query:** `/api/trackers/all-fe`, `/all-noc`, `/unassigned`, `/my-installations`, `/api/trackers/<id>`, `/api/trackers/check/<sdwan_id>`, `/api/hierarchy/*`.
+- **Auth & login enumeration:** `POST /api/auth/login`, `POST /api/auth/logout`, and unauthenticated `GET /api/login/*` dropdown-population endpoints (public by design; see [§8.3](#83-residual-risks-accepted-or-tracked)).
+- **Tracker query:** `/api/trackers/all-fe`, `/all-noc` (`?filter=&page=&limit=`), `/unassigned`, `/my-installations`, `/api/trackers/counts`, `/api/trackers/search`, `/api/trackers/<id>`, `/api/trackers/check/<sdwan_id>`, `/api/hierarchy/*`. Every by-id read goes through `visible_tracker()`.
 - **Creation:** `POST /api/trackers`.
 - **Assignment / reassignment:** `/assign`, `/request-reassignment`, `/accept-reassignment`, `/deny-reassignment`, `/revoke-reassignment`, `/reassignment-requests`.
 - **SIM / ZTP / HSO ops:** `/sim/<sim_key>/status`, `/ztp/config`, `/ztp/fe-start`, `/ztp/fe-complete`, `/ztp/request-noc`, `/ztp/status`, `/api/ztp/config/*`, `/api/ztp/pull/*`, `/ready-for-coordination`, `/hso/submit`, `/hso/approve`, `/hso/reject`, `/hso/incomplete`. Each guards ownership (`fe.id`) or assignment (`noc_assignee`).
@@ -176,61 +247,253 @@ The **canonical** index setup is `scripts/create_indexes.py` (idempotent; covers
 - **Never interpolate user-typed data into HTML raw.** Anything that came from a person - customer, SDWAN ID, names, phones, reasons, search matches - goes through `esc()` inside a template literal, and through `escJs()` when it is an argument inside an inline handler (`onclick="fn(${escJs(x)})"`). HTML-escaping alone is not enough in a handler: the browser decodes `&#39;` back to `'` before the JavaScript is parsed. IDs, dates, counts and internal constants need neither. Prefer `textContent` when building a single node.
 - **Chat bubbles have one renderer.** `renderMessageBubble(msg, currentRole)` in [chat_component.html](templates/chat_component.html) is used by both the API render (`displayMessages`) and the Socket.IO append (`appendNewMessage`). They used to build different markup, so a message changed shape on reload. Add message types there, not in either caller.
 - **Voice notes carry their own duration.** `MediaRecorder` emits a live-stream container with no Duration header, so players report `Infinity` — controls read 0:00, the scrubber is dead and the clip cannot be replayed. Three things address this and all are needed: the client measures the length while recording and sends it as `duration` (stored on the message doc by `api_send_chat_message`); `fixAudioDurations()` seeks past the end to force the browser to resolve the real duration; and the clip's `src` goes on the `<audio>` element rather than a `<source type="...">`, which the browser skips outright when it does not claim to support the declared type. The recorder also picks its container from `MediaRecorder.isTypeSupported` (WebM/Opus on Chrome and Firefox, MP4/AAC on Safari) instead of hardcoding WebM.
-- **Image quality is preserved end to end** — downloads re-wrap the stored bytes as a Blob rather than re-drawing through a canvas, so the saved file is byte-identical to what is stored. Captures are taken at the camera's native stream resolution (canvas sized from `videoWidth`/`videoHeight`, never the displayed size), request `width/height: { ideal: 1920/1080 }` and encode at JPEG `0.95`; chat uploads are re-encoded server-side at max 1920px / quality 95 ([app.py](app.py) `api_upload_chat_file`). Raising these further inflates the inline `data:` URLs that ship on every chat poll and count against Mongo's 16MB document cap.
+- **Image quality is preserved end to end** — downloads re-wrap the stored bytes as a Blob rather than re-drawing through a canvas, so the saved file is byte-identical to what is stored. Captures are taken at the camera's native stream resolution (canvas sized from `videoWidth`/`videoHeight`, never the displayed size), request `width/height: { ideal: 1920/1080 }` and encode at JPEG `0.95`; chat uploads are re-encoded server-side per `MEDIA_PROFILE` (default: longest side 1920px, quality 95) by `_reencode_chat_image` ([app.py:3549](app.py#L3549)), off the event loop. Files are stored in GridFS and served by URL, so higher settings cost storage and download size, not document size.
 
 ### `app.py` section order
 1. Config & setup → 2. Helpers (`get_utc_now`, `serialize_doc`, `make_event`, `login_required`, `is_chat_unlocked`) → 3. Page routes → 4. Auth/login APIs → 5. Tracker query APIs → 6. Tracker creation → 7. NOC ops (assign/SIM/ZTP/HSO) → 8. Chat APIs → 9. Analytics APIs → (10) Admin panel → (11) Socket.IO handlers & broadcast helpers → entry point.
 
 ---
 
-## 8. Security — gaps & missing controls
+## 8. Security — controls, production settings & residual risks
 
-> All findings below are code-verified. Treat this as the pre-production hardening checklist. **None are fixed yet** — this guide documents them; implementation is a follow-up.
+> **Status 2026-09-28:** every finding from the pre-production audit is fixed and verified. A scripted probe of 18 abuse scenarios, all 18 of which succeeded before this work, now fails on every one, while 7 legitimate flows keep working, with no server errors, in both serving modes (threading and gevent). Real-browser suites cover CSRF, CSP (no violations on any page), session expiry and live updates. The probes live outside the repo because they need the credential workbook.
 
-### Findings
-- **Weak default secrets.** `SECRET_KEY` defaults to `'dev-secret-key-change-in-production'` ([app.py:12](app.py#L12)). `ADMIN_PASSWORD` defaults to `'qwerty'` and is compared in plaintext, non-constant-time ([app.py:3170](app.py#L3170), [app.py:3216](app.py#L3216)).
-- **`/admin` page is unauthenticated.** The route renders the panel to anyone ([app.py:3205](app.py#L3205)); only the `/admin/api/*` calls are gated, and only by a `session['admin_authenticated']` flag with **no rate-limiting, lockout, or CSRF**.
-- **Socket.IO has zero auth/authorization.** `connect`/`join_tracker` accept any client ([app.py:3329-3345](app.py#L3329)); CORS is wide open (`cors_allowed_origins="*"`, [app.py:22](app.py#L22)). Any party can join `tracker_{arbitrary_id}` and receive the **full serialized tracker payload** on every change → IDOR + data leak over WebSocket.
-- **IDOR on tracker read.** `GET /api/trackers/<id>` is `@login_required` only, no ownership/assignment check ([app.py:438](app.py#L438)) — any logged-in user can read any tracker by id.
-- **Unauthenticated user enumeration.** `GET /api/login/*` exposes all usernames/names/regions without auth ([app.py:268-317](app.py#L268)); combined with **no login rate-limiting/lockout** ([app.py:343](app.py#L343)).
-- **Predictable seeded passwords.** `scripts/seed_users.py` defaults each password to the username when the Excel has none.
-- **No CSRF protection** on any state-changing POST (cookie-session auth, SameSite=Lax default only).
-- **Unhardened session cookies.** `SESSION_COOKIE_SECURE` / `SAMESITE` / lifetime are not set — the cookie can ride plain HTTP if the proxy is misconfigured.
-- **NoSQL operator-injection surface.** Request-JSON values are placed directly into Mongo query dicts (login builds `query['name'] = data.get(...)`, [app.py:349-364](app.py#L349)). The password hash check still applies, but object payloads (`{"$ne": null}`) can widen matches — cast query inputs to `str` / validate.
-- **Weak upload validation.** Audio and non-image uploads, and every data URL a client posts, arrive with a client-chosen content type. *Partly fixed 2026-09-26:* media now lives in GridFS (no document growth), and `safe_media_type()` stores and serves anything outside `INLINE_MEDIA_TYPES` as an `application/octet-stream` attachment, with `X-Content-Type-Options: nosniff` and `Content-Security-Policy: default-src 'none'; sandbox` on every `/api/media` response. Verified: an FE could previously store an HTML or SVG "site photo" whose `/api/media/<id>` link ran script on this origin; it is now an inert download. Still open: no size/dimension limits per media type, and no content sniffing of image bytes.
-- **Stored XSS on dashboards - FIXED 2026-09-26.** Dashboard rows, search results and hierarchy modals interpolated user-typed fields (customer, SDWAN ID, FE and NOC details, transfer reasons) straight into `innerHTML`. Verified exploitable end to end: an FE created a tracker through the normal API whose customer name then executed script in every NOC and supervisor browser that listed or searched it. Both dashboards now route every such value through `esc()`, and values passed into inline handlers through `escJs()` - see [section 7](#7-conventions--code-map). Tracker detail pages were checked with the same payload and were already safe (they use `textContent`).
-- **No security headers** (CSP / HSTS / X-Frame-Options / X-Content-Type-Options) at the app layer, and the proxy configs the ops script generates don't add them either.
+### 8.1 Controls in place
 
-### Remediation checklist (prioritized)
-- **P1:** require `SECRET_KEY` & `ADMIN_PASSWORD` from env (fail if default in prod); add Socket.IO connection auth + per-room authorization; add ownership check to `GET /api/trackers/<id>`; rate-limit login & `/admin/auth`.
-- **P2:** CSRF tokens on POSTs; harden session cookies (`Secure`, `SameSite=Strict`, lifetime); add security headers; enforce an upload MIME/type allowlist + size caps; cast/validate query inputs.
-- **P3:** move chat attachments to GridFS or an object store; lock down CORS to the real origin.
+| Area | Before | Now | Code |
+|---|---|---|---|
+| Session signing key | Fixed public default in `app.py` | The app refuses to start unless `SECRET_KEY` has ≥ 32 characters and is not a known placeholder (tolerated only with `FLASK_DEBUG=true`) | [app.py:111](app.py#L111) |
+| Tracker reads | Any signed-in user could read any tracker by id | Every by-id read, chat read and media file goes through `visible_tracker()`, the user's dashboard scope; out-of-scope ids answer 404, so probing reveals nothing | [app.py:1341](app.py#L1341) |
+| Chat writes | Any signed-in user could post | Only the owning FE, the assigned NS and the NOC Support Group | [app.py:1355](app.py#L1355) |
+| Live updates (Socket.IO) | No authentication, any origin, client-chosen rooms and roles | Session required to connect; rooms authorized server-side; same-origin only; revoked sessions disconnected; dashboard broadcasts carry ids, not data | [§5.1](#51-rooms-and-events) |
+| Sign-in | No throttling; query operators accepted; response time revealed which accounts exist | Failures counted in MongoDB, shared by every process: 5 per account+IP, 20 per account, 30 per IP in 15 min, then `429` with `Retry-After`; inputs must be strings; unknown accounts cost the same time as wrong passwords | [app.py:583](app.py#L583), [app.py:1066](app.py#L1066) |
+| Sessions | No way to revoke a session | 12 h sliding lifetime; `session_epoch` revokes all of a user's sessions on password change, deactivation or deletion, re-checked every 30 s per process; API calls then get `401` + `X-Auth-Required` and pages go to `/login?expired=1` | [app.py:661](app.py#L661), [app.py:688](app.py#L688) |
+| CSRF | None | Per-session token on every POST/PUT/PATCH/DELETE, attached automatically by [static/js/secure_fetch.js](static/js/secure_fetch.js), plus an Origin/Referer host check; a stale token is refreshed and the request retried once | [app.py:765](app.py#L765) |
+| Cookies | Framework defaults | `HttpOnly`; `SameSite=Lax` (Strict would sign users out when they open a tracker link from WhatsApp or email); `Secure` whenever the request arrived over HTTPS, or always with `SESSION_COOKIE_SECURE=true` | [app.py:273](app.py#L273) |
+| Response headers | None | CSP (scripts, styles, fonts and connections same-origin, plus the geocoder), `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy`, `Permissions-Policy` (camera, microphone, location: this site only), `Cross-Origin-Opener-Policy`, HSTS when `HSTS_MAX_AGE` is set, `Cache-Control: no-store` on API JSON | [app.py:316](app.py#L316) |
+| Admin panel | Page public; password `qwerty` compared in plain text; no limits | Disabled unless `ADMIN_PASSWORD` is ≥ 12 characters and not a common password; constant-time comparison; the same lockout as sign-in; 30-minute idle expiry (`ADMIN_SESSION_MINUTES`); every sign-in and user change written to `audit_logs`; output escaped | [app.py:4453](app.py#L4453) |
+| Uploads and media | Client-chosen content types served inline | Only allow-listed image and audio types are served inline; anything else downloads as `application/octet-stream` under a sandboxing CSP; chat photos are re-encoded; requests capped at 16 MB | [app.py:430](app.py#L430), [app.py:809](app.py#L809) |
+| Stored XSS | User-typed fields rendered raw on dashboards | `esc()` / `escJs()` on every user-typed value ([§7](#7-conventions--code-map)) | dashboards |
+| Seeded passwords | Password defaulted to the username | `seed_users.py` skips rows without a password | [scripts/seed_users.py](scripts/seed_users.py) |
+| Client IPs behind the proxy | Every user appeared as 127.0.0.1 | `TRUST_PROXY_HOPS=1` gives the real client IP to the login limits and HTTPS detection to cookies and HSTS, and binds the app to 127.0.0.1 so nothing can bypass the proxy | [app.py:260](app.py#L260) |
+
+### 8.2 Go-live checklist (production `.env`)
+
+| Setting | Value | Why |
+|---|---|---|
+| `SECRET_KEY` | 48+ random characters: `python -c "import secrets; print(secrets.token_urlsafe(48))"` | Signs every session. Changing it signs everyone out, which is also the way to invalidate all sessions at once. |
+| `ADMIN_PASSWORD` | ≥ 12 characters, not a common password | Otherwise the admin panel stays disabled (the rest of the app runs). |
+| `FLASK_DEBUG` | `false` | Debug mode also tolerates a weak `SECRET_KEY`. |
+| `SOCKETIO_ASYNC_MODE` | `gevent` | The production server ([§9](#9-production-deployment--windows-primary--linux)). |
+| `TRUST_PROXY_HOPS` | `1` behind one Caddy/Nginx; `0` when clients connect directly | Real client IPs for the login limits, HTTPS detection for cookies and HSTS, and a loopback-only bind. Never set it higher than the number of proxies you run: clients could then forge their IP. |
+| `SESSION_COOKIE_SECURE` | `true` once the site is HTTPS-only | The cookie never travels over plain HTTP. |
+| `HSTS_MAX_AGE` | `31536000`, **only** with a trusted certificate on a stable hostname | Browsers then refuse plain HTTP for that long, and the server cannot take it back. |
+| `MONGO_URI` | a dedicated user with `readWrite` on the database, `authSource=admin` | The default URI is unauthenticated localhost. Keep MongoDB bound to 127.0.0.1. |
+| `CORS_ORIGINS` / `PUBLIC_ORIGINS` | unset, unless users reach the app under a hostname the proxy does not pass through as `Host` | `CORS_ORIGINS` replaces the socket same-origin rule with an explicit list (include the site's own origin); `PUBLIC_ORIGINS` adds origins to the CSRF check. |
+| `CSP_CONNECT_EXTRA` | default (Nominatim) | Change only if the reverse-geocoding service changes. |
+
+**Rotate anything that was ever committed.** Old defaults (the previous `SECRET_KEY` string, `qwerty`) are in git history: treat them as public. Accounts seeded from the workbook keep the workbook's passwords, so hand them out over a trusted channel and reset any that leaked through the admin panel.
+
+### 8.3 Residual risks (accepted or tracked)
+
+- **CSP still allows inline script and style** (`'unsafe-inline'`), because the templates use inline `<script>` blocks and `onclick=` handlers throughout. XSS defence therefore rests on output escaping (`esc()` / `escJs()`, `textContent`). `connect-src` also allows `ws:`/`wss:` to any host, for browsers whose `'self'` does not cover WebSocket URLs. Removing `'unsafe-inline'` means moving every handler into static JS files; tracked in [§14](#14-known-issues--improvement-roadmap).
+- **The login pickers list account names publicly** (`GET /api/login/*`). The login screen needs them before anyone is signed in. Throttling limits guessing; the lists reveal names, groups and regions, not credentials.
+- **Reverse geocoding goes to a third party.** FE browsers send GPS coordinates to `nominatim.openstreetmap.org`, whose usage policy allows at most one request per second and no bulk use. For stricter data handling, self-host Nominatim and point `CSP_CONNECT_EXTRA` and the two calls in `fe_new_installation.html` / `fe_tracker_detail.html` at it.
+- **Live-update rooms are authorized at join time**; see [§5.7](#57-known-limits).
+- **The session cookie is signed, not encrypted.** Users can read their own session (id, role, names) but cannot change it. Never put a secret in the session.
+- **The admin panel has one shared password and no second factor.** The audit log records the IP of each admin action, not a named person. Limit who knows it, and consider allowing `/admin` only from the NOC network at the proxy.
+- **MongoDB access control is the operator's job**; see the checklist above.
+
+### 8.4 Checks after touching auth, sessions, sockets or headers
+
+1. `python app.py` with a short `SECRET_KEY` and `FLASK_DEBUG=false` must refuse to start.
+2. Open a tracker page: DevTools → Console shows no Content-Security-Policy violations.
+3. Signed in as an FE with no link to a tracker, `GET /api/trackers/<its id>` answers 404.
+4. Deactivate a test user in `/admin`: their open page goes to the login screen within a second.
 
 ---
 
-## 9. Windows-server production setup & caveats
+## 9. Production deployment — Windows (primary) & Linux
 
-### Serving model
-`python app.py` runs `socketio.run(app, async_mode='threading', host='0.0.0.0', port=5001)` ([app.py:22](app.py#L22), [app.py:3436-3441](app.py#L3436)). Port default is **5001** (override with `PORT`); debug is gated behind `FLASK_DEBUG`.
+> The production server is Windows. Sections 9.1–9.6 and 9.8 are for it. Section 9.7 covers Linux with gunicorn, which does not run on Windows at all.
 
-> ⚠️ The entry-point comment claims eventlet monkey-patching / eventlet WSGI — **that is stale**. There is no eventlet import; mode is **threading**. Threading mode uses the Werkzeug server: fine for a small team, but it is **single-process with limited concurrency** — not a hardened multi-worker production server.
+### 9.1 Topology
 
-### Ops console — `scripts/ServerAdminPankaj_V3.ps1`
-An interactive PowerShell menu that manages the whole stack on Windows:
-- Start/Stop/Restart **Flask** (runs `python app.py` detached, tracks a PID file, sweeps the port on stop).
-- Start/Stop/Restart the **MongoDB** Windows service; launch `mongosh`.
-- Reverse proxy: **Caddy** (preferred, `tls internal` local HTTPS) or **Nginx** fallback (auto-generates a self-signed cert + config with `X-Forwarded-Proto https`).
-- Optional **NSSM** Windows-service install for Flask / Caddy / Nginx.
-Edit the `$Cfg` block at the top (`AppRoot`, `VenvPython`, `Port`, cert paths, service names) to match the server. Run **as Administrator** for service control and local root-CA trust.
+```
+ FE phones / NOC desktops
+        |  HTTPS 443: pages, API, Socket.IO (long-polling, then WebSocket)
+        v
+ Caddy (preferred) or Nginx          TLS, compression, WebSocket upgrade,
+        |                            X-Forwarded-For / -Proto, Host
+        |  http://127.0.0.1:5001
+        v
+ "ITracker" Windows service (NSSM)   python app.py with SOCKETIO_ASYNC_MODE=gevent:
+        |                            one process, one event loop for HTTP and sockets,
+        |                            CPU work (scrypt, Pillow) on a thread pool
+        |  mongodb://127.0.0.1:27017 (authenticated)
+        v
+ MongoDB service                     data + GridFS media
+```
 
-### Caveats & pitfalls
-- **Do NOT use the "Install Waitress Service" option for the app.** Waitress is WSGI-only and **cannot handle WebSocket upgrades** → Socket.IO breaks. Use the `python app.py` (Start-Flask) path behind the reverse proxy, or migrate to a proper eventlet/gevent worker.
-- **TLS:** Caddy/Nginx here serve `localhost` with self-signed/internal certs. Production needs a real domain + trusted cert.
-- **MongoDB auth:** the authenticated prod URI is commented out ([app.py:15](app.py#L15)); the default is **unauthenticated localhost**. Enable auth and bind carefully; never expose Mongo externally.
-- **Perf flags:** `TEMPLATES_AUTO_RELOAD=True` and `SEND_FILE_MAX_AGE_DEFAULT=0` ([app.py:18-19](app.py#L18)) disable template/static caching — turn these off / raise cache age in production.
-- **Logging:** the app uses `print()` throughout. Under NSSM, redirect `AppStdout`/`AppStderr` to log files and configure rotation.
-- **All third-party assets are self-hosted** (Socket.IO, Chart.js stack, Inter/Manrope/Outfit/Fjalla fonts, Material Symbols) under `static/js/vendor/` and `static/fonts/` — no CDN or Google Fonts requests at runtime, so the app works on offline/field networks. If a library version needs bumping, re-download the file into `static/js/vendor/` (or refresh the woff2 in `static/fonts/` via the Google Fonts CSS API) rather than pointing back at a CDN.
-- **Firewall / binding:** the app binds `0.0.0.0:5001`. Expose only the reverse-proxy port; block 5001 to external traffic.
+### 9.2 Choosing the server
+
+| Option | Verdict | Why |
+|---|---|---|
+| `python app.py` with `SOCKETIO_ASYNC_MODE=gevent` | **Production, Windows and Linux** | gevent's WSGI server with WebSocket support, every connection on one event loop; measured in 9.5. CPU-heavy calls go to a thread pool through `run_blocking()` ([app.py:23](app.py#L23)). |
+| `python app.py` with `threading` (the default) | Development only | Werkzeug's development server; one OS thread per connection (1,213 threads at 300 sockets). It refuses to start without a console, so it cannot be a service: the app says so and exits. |
+| waitress | Never | WSGI only: it cannot carry WebSocket upgrades. The ops console's old "Waitress Service" option is gone, and the console warns if one is still installed. |
+| eventlet | Never | Hangs on the first MongoDB call on Windows (measured) and is deprecated upstream. The app refuses to start with it. |
+| gunicorn | Linux only, `-w 1` | Needs `fork`/`fcntl`, so it does not run on Windows. See 9.7 for why more than one worker per instance breaks Socket.IO. |
+
+### 9.3 Install or upgrade on the Windows server
+
+1. **Prerequisites:** Python 3.11 x64 and MongoDB as a Windows service. `exec_prod\deployed\Install-ServerStack.ps1` (as Administrator; PowerShell 7 recommended) downloads Caddy, nginx and NSSM and installs the app's requirements into the venv. The downloads need internet access; on an offline server put `caddy.exe`, nginx and `nssm.exe` in the folders named in its `$Config` first, and it skips them.
+2. **Offline wheels.** The server installs Python packages from `exec_prod\wheels`, which is gitignored: it travels with the deploy copy, not with git. On any machine with internet access, from the repo root:
+   ```powershell
+   python -m pip download -r Requirements.txt -d exec_prod\wheels --only-binary=:all: --platform win_amd64 --python-version 3.11 --implementation cp
+   ```
+   **Do this before the next deploy.** On 2026-09-28 the folder held six wheels (dnspython, eventlet, greenlet, h11, simple_websocket, wsproto) and none of gevent's. The machine that wrote this guide could not reach PyPI.
+3. **Virtual environment:**
+   ```powershell
+   py -3.11 -m venv venv
+   venv\Scripts\python -m pip install --no-index --find-links exec_prod\wheels -r Requirements.txt
+   venv\Scripts\python -c "import gevent, geventwebsocket; print('gevent', gevent.__version__)"
+   ```
+   Tested set: gevent 24.2.1, gevent-websocket 0.10.1, greenlet 3.1.1, zope.event 6.2, zope.interface 8.5, cffi 1.17.1, pycparser 2.22.
+4. **Configuration:** copy `.env.example` to `.env` and work through [§8.2](#82-go-live-checklist-production-env). The minimum:
+   ```ini
+   SECRET_KEY=<48 random characters>
+   ADMIN_PASSWORD=<12+ characters>
+   MONGO_URI=mongodb://itrack:<password>@127.0.0.1:27017/sdwan_tracker?authSource=admin
+   SOCKETIO_ASYNC_MODE=gevent
+   TRUST_PROXY_HOPS=1
+   SESSION_COOKIE_SECURE=true
+   FLASK_DEBUG=false
+   ```
+5. **Database:** `venv\Scripts\python scripts\create_indexes.py`, then users with `scripts\seed_users.py --dry-run` and again without `--dry-run` ([§12](#12-one-time-scripts)).
+6. **Service and proxy.** Edit `$Cfg` at the top of `exec_prod\ServerAdminPankaj_V3.ps1` (the same console as `exec_prod\deployed\ManageServer.ps1`): `AppRoot`, `VenvPython`, `Port`, `LogDir`. Run it as Administrator:
+   - **S** installs the app as the `ITracker` service. NSSM runs `python app.py` in gevent mode, starts it at boot after MongoDB, restarts it 5 s after any exit, and writes `LogDir\itracker.out.log` / `itracker.err.log`, rotated at 10 MB.
+   - **L** installs Caddy as a service (writing the Caddyfile first if there is none), or **Q** for Nginx. Replace `localhost` with the real hostname and certificate.
+   - **Servers that already run Nginx: choose U.** It rewrites `nginx.conf` from the current template, keeps a backup and reloads. Configs written by older consoles pass no WebSocket upgrade and keep nginx's 1 MB upload limit.
+   - **A / B / C** start, stop and restart the app, through the service manager when the service exists.
+7. **Verify:**
+   - `Invoke-WebRequest http://127.0.0.1:5001/healthz -UseBasicParsing` returns `200 {"status":"ok"}`.
+   - `LogDir\itracker.out.log` shows `[startup] gevent mode, listening on 127.0.0.1:5001`.
+   - In a browser at `https://<host>`: DevTools → Network → filter `socket.io` → a `transport=websocket` request with status **101**. Only `transport=polling` requests means the proxy is not passing the upgrade (live updates still work, less efficiently).
+8. **Firewall:** open 443, and 80 if Caddy should redirect or obtain certificates. Keep 5001 and 27017 closed to the network; with `TRUST_PROXY_HOPS=1` the app binds 127.0.0.1 anyway.
+
+**Upgrades:** copy or pull the new code, re-run the `pip install` line if `Requirements.txt` changed, then **C** (restart). Users see sockets drop and reconnect on their own within about 1–15 s, and pages catch up ([§5.2](#52-delivery-guarantees--and-how-the-app-closes-the-gaps)). Sessions survive restarts (signed cookies) unless `SECRET_KEY` changed. Browsers fetch changed CSS/JS automatically, because `STATIC_VERSION` is a fingerprint of `static/`.
+
+### 9.4 Production requirements that are easy to miss
+
+- **HTTPS with a certificate the phones trust.** Camera capture and GPS need a secure context, so over plain `http://<LAN IP>` the FE photo and location features fail. Caddy's `tls internal` is trusted only on machines that ran `caddy trust`, not on field phones. Use a public hostname (Caddy then obtains a certificate itself) or a certificate from your organisation's CA (`tls cert.pem key.pem`).
+- **The proxy must pass `Host`.** The CSRF and socket origin checks compare against it. Caddy and the generated Nginx config do. If a proxy rewrites it, list the public origin in `PUBLIC_ORIGINS` and `CORS_ORIGINS`.
+- **nginx on Windows tops out near 500 open pages:** one worker, 1,024 connections, two per live socket. Caddy has no such limit, so prefer it.
+- **Keep the server clock in sync** (Windows Time service). Timestamps are stored as naive UTC.
+
+### 9.5 Capacity & sizing — how many workers
+
+One process, measured 2026-09-28 on the development machine (8 logical CPUs, Python 3.11, load generator on the same machine), with 300 authenticated sockets open and 30 clients driving the dashboard APIs:
+
+| | threading | gevent |
+|---|---|---|
+| OS threads with 300 sockets | 1,213 | 12 |
+| Memory | 139 MB | 112 MB |
+| Dashboard API throughput | ~95 req/s | ~103 req/s |
+| Dashboard API p95 | 408 ms | 544–555 ms |
+| One chat message to 300 sockets | ≤ 197 ms | ≤ 188 ms |
+| 40 simultaneous sign-ins (scrypt), p50 / max | 632 / 899 ms | 686 / 1,021 ms (3,099 ms p50 before the CPU offload) |
+| A cheap request during those sign-ins, max | 353 ms | 86 ms (1,640 ms before the offload) |
+
+**How many workers: one process.** The organisation has ~270 accounts. If every one of them had a page open at once, that would still be fewer sockets than the test above. Ordinary use (a dashboard refresh per event plus a 120 s safety net, chat, form posts) is a few requests per second against a measured ~100/s. One gevent process has roughly ten times the headroom this deployment needs.
+
+**The usual gunicorn rule (2 × cores + 1 workers) does not apply.** It is for stateless, synchronous workers. A gevent process is already concurrent, and a Socket.IO session is state that lives in exactly one process.
+
+**When to add processes:** at peak, the app process stays above ~70 % of one CPU core, or dashboard p95 stays above ~1 s, or live connections approach ~1,000 (not measured beyond 300; measure before relying on more). Then run *N* ≈ physical cores − 1 processes (leave a core for MongoDB and the proxy) as described in 9.6.
+
+**MongoDB pool:** `MONGO_MAX_POOL_SIZE` (default 100) is per process, so *N* processes open up to *N* × that many connections. Lower it to 50 from four processes up.
+
+### 9.6 Scaling out — more than one process
+
+Only when 9.5 calls for it. All four parts are required; with any one missing, live updates silently reach only some users:
+
+1. **Message queue**, so an emit in one process reaches clients held by another: `SOCKETIO_MESSAGE_QUEUE=redis://127.0.0.1:6379/0` on every instance, plus the `redis` Python package (not in `Requirements.txt` today; add it together with the queue). On Windows use Memurai (Redis-compatible) or Redis on another host.
+2. **Sticky sessions** at the proxy, because a Socket.IO session lives in the process that opened it. Caddy: `lb_policy cookie` (or `ip_hash`). Nginx: `ip_hash` in the `upstream` block. `ip_hash` puts everyone behind one NAT address (a whole office) on the same instance; the cookie policy spreads them. Both generated configs contain the multi-instance form, commented out.
+3. **One port per instance**, for example a second NSSM service:
+   ```powershell
+   nssm install ITracker2 G:\srv\app\itracker\venv\Scripts\python.exe app.py
+   nssm set ITracker2 AppDirectory G:\srv\app\itracker
+   nssm set ITracker2 AppEnvironmentExtra SOCKETIO_ASYNC_MODE=gevent PORT=5002 PYTHONUNBUFFERED=1
+   nssm set ITracker2 AppStdout G:\srv\app\itracker\logs\itracker2.out.log
+   nssm set ITracker2 AppStderr G:\srv\app\itracker\logs\itracker2.err.log
+   nssm start ITracker2
+   ```
+4. **Health checks:** `health_uri /healthz` (Caddy) takes an instance out of rotation while its database connection is down.
+
+Already safe across processes: login throttling and the `tracker_id` counter live in MongoDB, and each process re-checks session revocation every 30 s and sweeps its own sockets. **Not verified here:** there is no Redis on the development machine, so load-test this path on a staging server before relying on it.
+
+### 9.7 Linux alternative: gunicorn
+
+Not run for this guide (no Linux host was available); the commands follow Flask-SocketIO's documented deployment.
+
+```bash
+python3.11 -m venv venv && venv/bin/pip install -r Requirements.txt gunicorn
+SOCKETIO_ASYNC_MODE=gevent venv/bin/gunicorn \
+    -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 \
+    --bind 127.0.0.1:5001 --worker-connections 2000 app:app
+```
+
+- **Always `-w 1`.** gunicorn hands each request to whichever worker is free, but Socket.IO long-polling needs every request of a session to reach the process that holds it. With `-w 2` or more, sessions break at random ("Invalid session", endless reconnects). For more capacity run more *instances*, one `-w 1` gunicorn per port, with the message queue and a sticky proxy, exactly as in 9.6.
+- gunicorn's gevent worker patches the standard library before importing `app.py`; `app.py` detects that and does not patch twice. Do not add `--preload`: the app would then be imported, unpatched, in the master process.
+- `--worker-connections` (default 1,000) caps simultaneous connections per worker, sockets included.
+- `python app.py` with `SOCKETIO_ASYNC_MODE=gevent` also works on Linux. gunicorn adds graceful restarts (`kill -HUP`) and a supervising master process.
+
+A systemd template, one unit per port (`systemctl enable --now itrack@5001`):
+
+```ini
+# /etc/systemd/system/itrack@.service
+[Unit]
+Description=ITrack instance on port %i
+After=network-online.target mongod.service
+
+[Service]
+User=itrack
+WorkingDirectory=/srv/itrack
+Environment=SOCKETIO_ASYNC_MODE=gevent
+ExecStart=/srv/itrack/venv/bin/gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 --bind 127.0.0.1:%i app:app
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+The app reads the rest of its settings from `/srv/itrack/.env`. Put the same Nginx server block in front that the ops console generates (`New-NginxConfig` in [exec_prod/ServerAdminPankaj_V3.ps1](exec_prod/ServerAdminPankaj_V3.ps1)). On Linux also set `worker_processes auto;` and `worker_connections 4096;`, which Windows nginx cannot use.
+
+### 9.8 Operations
+
+- **Logs:** the service writes `LogDir\itracker.out.log` and `itracker.err.log`, rotated at 10 MB. Lines are prefixed `[startup]`, `[warning]`, `[info]`, `[socket]`, `[audit]` or `[Socket.IO]`. Request logs belong to the proxy (the Caddy `log` directive, nginx `access_log`).
+- **Monitoring:** poll `GET /healthz` ([app.py:780](app.py#L780)). It returns `200 {"status":"ok"}`, or `503 {"status":"degraded"}` when MongoDB does not answer. It needs no sign-in and reveals nothing else.
+- **Backups:** a nightly `mongodump` through Task Scheduler; see [§16.4](#164-scheduled-maintenance--use-the-os-scheduler). GridFS media is in the same database, so one dump covers data and photos. Test a restore into a scratch database at least once.
+- **Rollback:** every change is its own commit on `main` (table below). Revert one with `git revert <sha>`, or deploy an older checkout, and restart the service. The series adds the `login_attempts` collection, writes `audit_logs` entries and a `session_epoch` field on users, but migrates no stored data, so reverting code needs no data step.
+- **Settings:** security in [§8.2](#82-go-live-checklist-production-env); every environment variable in [§13](#13-dev-commands--environment-variables).
+
+**The 2026-09 hardening series, one concern per commit** (oldest first):
+
+| Commit | What it changes |
+|---|---|
+| `91683c8` | Authorization: tracker reads, chat writes and media follow the dashboard scope |
+| `3aba43d` | Sign-in throttling, session expiry and revocation, no query operators |
+| `1d5eaed` | Versioned static URLs, so a year-long cache never serves stale CSS/JS |
+| `69c61eb` | CSRF protection on every state-changing request |
+| `045fd35` | Strong `SECRET_KEY` required; cookie flags; security headers |
+| `107ccac` | Admin panel: strong password, lockout, audit log, escaping |
+| `3127b5e` | Socket authentication and room authorization; photos after live updates |
+| `01e268d` | Reconnect forever, catch up after outages, recover on wake |
+| `e8f19cc` | gevent production mode; CPU work off the event loop; `/healthz` |
+| `57182cc` | gevent pinned; serving guidance; clear error when threading has no console |
+| `7d81f31` | Ops console: gevent Windows service, WebSocket-ready Nginx |
+| `3b6c843` | Ops console: option U rewrites an existing `nginx.conf` |
 
 ---
 
@@ -244,7 +507,7 @@ Edit the `$Cfg` block at the top (`AppRoot`, `VenvPython`, `Port`, cert paths, s
 - **Percentage widths collapse inside chat bubbles.** `.chat-message` is shrink-to-fit, so a child with `width: 100%` has no definite parent width to resolve against and falls back to min-content - this is what rendered voice notes as a tiny blob. Give media a definite width (`width: 15rem`) plus `max-width: 100%`, never the reverse.
 - **Full-screen overlays must lock the page behind them.** The image viewer sets `body { position: fixed; top: -<scrollY>px }` while open and restores the offset on close (a plain `overflow: hidden` does not stop iOS rubber-banding). It also sets `window.appImageViewerOpen`, which the global pull-to-refresh touch handlers check so panning inside the viewer never triggers a page refresh. Any new full-screen modal should do the same.
 - **Media inside chat bubbles must be fluid.** `.chat-audio` and `.chat-image` size to the bubble (`width: 100%` with a max), bubbles widen to 85% below 640px, and `#chat-messages` clips horizontally. A fixed-width player overflowed the chat card on phones.
-- **Chat never yanks the user's scroll position.** `displayMessages()` in [chat_component.html](templates/chat_component.html) skips the re-render entirely when the message signature (count + last id + timestamp) is unchanged, and only pins to the bottom when the user is already within 60px of it. The 5s poll therefore leaves someone reading history alone. Sending a message scrolls back to the bottom explicitly.
+- **Chat never yanks the user's scroll position.** `displayMessages()` in [chat_component.html](templates/chat_component.html) skips the re-render entirely when the message signature (count + last id + timestamp) is unchanged, and only pins to the bottom when the user is already within 60px of it. The 60 s safety-net poll therefore leaves someone reading history alone. Sending a message scrolls back to the bottom explicitly.
 - **FOUC gate:** `body { opacity: 0 }` until `.fonts-loaded` ([base.html:37](templates/base.html#L37)) plus font preloads — verify this doesn't leave a blank screen on slow mobile networks; provide a timeout fallback.
 
 ### Responsive audit checklist (do this for any UI change)
@@ -261,22 +524,19 @@ Edit the `$Cfg` block at the top (`AppRoot`, `VenvPython`, `Port`, cert paths, s
 **Pros**
 - Clean event-sourced audit trail (`events[]` via a single `make_event`).
 - Dedicated `stage_timestamps` make KPI aggregation cheap.
-- Room-scoped Socket.IO with auto reconnect-rejoin; hybrid REST fallback.
+- Live updates that heal themselves: authenticated rooms, reconnect forever, REST catch-up after any gap ([§5](#5-real-time-socketio--architecture--robustness)).
 - Retry history preserved for SIM/ZTP/HSO.
-- Comprehensive, idempotent index script; sensible reverse-proxy ops console for Windows.
+- Hardened: scoped authorization, CSRF, throttled sign-in, revocable sessions, security headers ([§8](#8-security--controls-production-settings--residual-risks)). One gevent process serves the whole organisation with headroom ([§9.5](#95-capacity--sizing--how-many-workers)).
+- Media in GridFS behind per-tracker authorization; lists paged and projected ([§15](#15-performance-scale--the-media-pipeline)).
+- Idempotent index script; a Windows ops console that installs the app as a service.
 
 **Cons**
-- Monolithic 3.4k-line `app.py` — hard to test in isolation.
-- Threading async mode → limited concurrency; not horizontally scalable as-is.
-- Analytics compute in Python by loading all matching trackers (no Mongo aggregation pipeline) → slow at scale.
-- Chat attachments as base64 in documents → doc bloat, 16 MB BSON ceiling.
-- `print()`-based logging.
+- Monolithic ~4,850-line `app.py`, hard to test in isolation; no automated test suite in the repo.
+- Analytics compute in Python over the matching trackers (no aggregation pipelines), so they slow down as data grows ([§15.8](#158-what-is-deliberately-still-open)).
+- `print()`-based logging (prefixed, and captured to rotating files by the service).
+- Scaling past one process needs Redis and a sticky proxy ([§9.6](#96-scaling-out--more-than-one-process)).
 
-**Loopholes (security — see [§8](#8-security--gaps--missing-controls))**
-- Unauthenticated Socket.IO room join leaks full tracker data (IDOR).
-- Tracker GET has no ownership check.
-- Public user-enumeration endpoints + no login rate-limiting.
-- Weak default admin/secret; no CSRF; unhardened cookies.
+**Loopholes:** none known to be open. Accepted residual risks are listed in [§8.3](#83-residual-risks-accepted-or-tracked).
 
 ---
 
@@ -289,10 +549,10 @@ All live in the tracked **`scripts/`** folder (moved out of the web-served `stat
 | `scripts/create_indexes.py` | **Canonical** MongoDB index setup for all collections; idempotent (skips existing). | Once on any fresh/prod DB, and after adding new query patterns. Safe to re-run. | Never harmful. |
 | `scripts/seed_users.py` | Makes `users` match the workbook. Reads the **per-role sheets**. Upserts every row **by username**, so existing accounts keep their `_id`, then removes accounts absent from the sheet. `--passwords-only` re-hashes passwords onto existing users and touches nothing else; `--dry-run` reports. *Until 2026-09-26 the full mode deleted every user and re-inserted them, giving everyone a new `_id` and orphaning every tracker - see [section 15.9](#159-incident-reseed-orphaned-every-tracker).* | Initial setup; syncing the user list with the sheet; password recovery with `--passwords-only`. | Against production without a `--dry-run` first. |
 | `scripts/relink_orphans.py` | Re-attaches trackers whose `fe.id` / `noc_assignee` point at user ids that no longer exist. FE by the username stored on the tracker; NOC by the name the tracker itself recorded (`noc_name`, `noc_history`, chat sender). Ambiguous ids are reported, never guessed. `--apply` writes a backup to `backups/` first; `--restore <file>` undoes it. | Once, after a reseed made with the old `seed_users.py`. Safe to re-run: reports "nothing to do". | - |
-| `scripts/migrate_media.py` | Moves inline base64 media out of tracker and chat documents into GridFS. `--gc` lists GridFS files no document references (e.g. after deleting trackers); `--gc --apply` deletes them, never touching files younger than an hour. | Once per database for the migration; `--gc` whenever trackers or messages are deleted. | - |
+| `scripts/migrate_media.py` | Moves inline base64 media out of tracker and chat documents into GridFS. `--gc` lists GridFS files no document references (e.g. after deleting trackers); `--gc --apply` deletes them, never touching files younger than an hour. | Once per database for the migration; `--gc` whenever trackers or messages are deleted, or weekly on a schedule ([§16.4](#164-scheduled-maintenance--use-the-os-scheduler)). | - |
 | `scripts/seed_trackers.py` | Generates sample tracker data for demo/testing. | Local demos / load testing. | Never in production. |
 | `init_db.py` (root) | **Legacy.** Creates the wrong `noc_users` collection and seeds `predefined_reasons`; does not set up `users`. | Only for the `predefined_reasons` seed, if you extract that. | Don't rely on it for indexes/users — use the scripts above. |
-| `exec_prod/ServerAdminPankaj_V3.ps1` | Windows ops console (start/stop app, Mongo, reverse proxy; NSSM services). | On the server, as Administrator. See [§9](#9-windows-server-production-setup--caveats). | Not for dev machines. Avoid its "Waitress Service" option (breaks WebSockets). |
+| `exec_prod/ServerAdminPankaj_V3.ps1` (same console: `exec_prod/deployed/ManageServer.ps1`) | Windows ops console: installs the app as a gevent Windows service (NSSM) and starts/stops it; MongoDB; Caddy or Nginx with WebSocket-ready configs (U rewrites an old `nginx.conf`). `exec_prod/deployed/Install-ServerStack.ps1` lays out Caddy, nginx and NSSM and installs the requirements. | On the server, as Administrator. See [§9.3](#93-install-or-upgrade-on-the-windows-server). | Not for dev machines. |
 
 Run scripts from the project root, e.g. `python scripts/create_indexes.py`.
 
@@ -306,14 +566,17 @@ Run scripts from the project root, e.g. `python scripts/create_indexes.py`.
 ## 13. Dev commands & environment variables
 
 ```bash
-# Run the app (default http://localhost:5001)
+# Run the app (default http://localhost:5001) - threading development server
 python app.py
 run.bat        # Windows shortcut
 ./run.sh       # Linux/Mac shortcut
 
+# The production server, locally (see section 9)
+SOCKETIO_ASYNC_MODE=gevent python app.py
+
 # MongoDB setup on a fresh DB
 python scripts/create_indexes.py      # indexes (canonical)
-python scripts/seed_users.py          # users from the master workbook (DESTRUCTIVE)
+python scripts/seed_users.py          # users from the master workbook (removes accounts not in it - --dry-run first)
 
 # Tailwind (only if templates changed)
 npm install
@@ -322,16 +585,58 @@ npm run watch:css       # dev watch
 ```
 
 ### Environment variables
+
+Read from `.env` in the project root (`.env.example` is the template). A variable already set in the process environment wins over `.env`.
+
+**Core**
+
 | Var | Default | Purpose |
 |---|---|---|
-| `MONGO_URI` | `mongodb://localhost:27017/sdwan_tracker` | DB connection (use an authenticated URI in prod) |
-| `SECRET_KEY` | dev placeholder | Flask session signing — **must set in prod** |
-| `ADMIN_PASSWORD` | `qwerty` | `/admin` panel password — **must set in prod** |
+| `MONGO_URI` | `mongodb://localhost:27017/sdwan_tracker` | Database; use an authenticated URI in production |
+| `MONGO_MAX_POOL_SIZE` | `100` | Connections per process (ignored when `MONGO_URI` sets `maxPoolSize`) |
+| `SECRET_KEY` | *(none usable)* | Session signing; ≥ 32 characters or the app refuses to start (unless `FLASK_DEBUG=true`) |
+| `FLASK_DEBUG` | `false` | Werkzeug debugger, template reload, no static caching |
+| `PORT` | `5001` | Listen port |
+| `HOST` | `127.0.0.1` when `TRUST_PROXY_HOPS` > 0, else `0.0.0.0` | Listen address |
+| `STATIC_VERSION` | fingerprint of `static/` | Cache-busting suffix on CSS/JS URLs |
+
+**Serving and real-time** ([§5](#5-real-time-socketio--architecture--robustness), [§9](#9-production-deployment--windows-primary--linux))
+
+| Var | Default | Purpose |
+|---|---|---|
+| `SOCKETIO_ASYNC_MODE` | `threading` | `gevent` in production; `eventlet` is refused |
+| `SOCKETIO_MESSAGE_QUEUE` | *(none)* | `redis://…`; required for more than one process |
+| `SOCKETIO_PING_INTERVAL` / `SOCKETIO_PING_TIMEOUT` | `25` / `20` | Socket heartbeat, seconds |
+| `SOCKET_SESSION_SWEEP_SECONDS` | `60` | How often sockets of revoked sessions are disconnected |
+| `CORS_ORIGINS` | *(same origin)* | Origins allowed to open sockets (comma-separated); a list replaces the same-origin default |
 | `REALTIME_MODE` | `hybrid` | `socket` \| `api` \| `hybrid` |
 | `SOCKET_TIMEOUT` | `2000` | ms before REST fallback |
-| `SOCKET_INCLUDE_FULL_DATA` | `true` | include full tracker in broadcasts |
-| `FLASK_DEBUG` | `false` | gate Werkzeug debug/reloader |
-| `PORT` | `5001` | listen port |
+| `SOCKET_INCLUDE_FULL_DATA` | `true` | Full tracker in `tracker_update` broadcasts |
+
+**Security** ([§8](#8-security--controls-production-settings--residual-risks))
+
+| Var | Default | Purpose |
+|---|---|---|
+| `ADMIN_PASSWORD` | *(none)* | `/admin` password; shorter than 12 characters or common → panel disabled |
+| `ADMIN_SESSION_MINUTES` | `30` | Admin idle timeout |
+| `TRUST_PROXY_HOPS` | `0` | Number of proxies in front (1 behind Caddy/Nginx) |
+| `SESSION_COOKIE_SECURE` | `auto` | `auto` (Secure over HTTPS) \| `true` \| `false` |
+| `SESSION_LIFETIME_HOURS` | `12` | Sliding session lifetime |
+| `USER_CHECK_TTL_SECONDS` | `30` | How often a process re-checks that a session is still valid |
+| `HSTS_MAX_AGE` | `0` (off) | HSTS max-age in seconds; only with a trusted certificate |
+| `PUBLIC_ORIGINS` | *(none)* | Extra origins allowed for state-changing requests (comma-separated) |
+| `CSP_CONNECT_EXTRA` | `https://nominatim.openstreetmap.org` | Extra `connect-src` origins (space-separated) |
+| `LOGIN_MAX_FAILURES` / `LOGIN_ACCOUNT_MAX_FAILURES` / `LOGIN_IP_MAX_FAILURES` | `5` / `20` / `30` | Failed sign-ins allowed per account+IP / account / IP… |
+| `LOGIN_WINDOW_MINUTES` | `15` | …within this window |
+| `AUDIT_RETENTION_DAYS` | `365` | `audit_logs` expiry |
+
+**Media** ([§15.4](#154-the-media-pipeline--why-the-same-photo-has-three-different-sizes))
+
+| Var | Default | Purpose |
+|---|---|---|
+| `MEDIA_PROFILE` | `balanced` | `compact` \| `balanced` \| `original`: presets for the four below |
+| `IMAGE_MAX_DIM` / `IMAGE_QUALITY` | `1920` / `95` | Chat photo re-encode: longest side in px (0 = keep) / JPEG quality |
+| `CAPTURE_MAX_DIM` / `CAPTURE_QUALITY` | `1920` / `0.95` | In-app camera captures |
 
 ---
 
@@ -340,8 +645,8 @@ npm run watch:css       # dev watch
 Still-valid items (the resolved real-time bugs from the old ANALYSIS.md have been dropped):
 
 **Real-time / performance**
-- Dashboard `dashboard_update` triggers a **full list reload** (`debouncedReload`) — switch to targeted card insert/update/remove using the payload's `tracker_id`.
-- Add a persistent **connection-status indicator** in the header (critical for unreliable field networks).
+- Dashboard `dashboard_update` triggers a **reload of the current page and badge counts** (`debouncedReload`, 500 ms debounce). Cheap since lists are paged; a targeted card insert/update/remove using the payload's `tracker_id` would remove even that.
+- A **"Reconnecting…" pill** already appears while the socket is down ([base.html:400](templates/base.html#L400)); a persistent indicator in the header would help on unreliable field networks.
 - Connect the **analytics dashboard** to Socket.IO for live KPI refresh.
 
 **Analytics / KPIs**
@@ -351,11 +656,12 @@ Still-valid items (the resolved real-time bugs from the old ANALYSIS.md have bee
 - Add **SLA thresholds** + breach flags and a live status-funnel card.
 
 **Code quality / storage**
-- Move chat attachments to **GridFS / object store** (currently base64 in docs).
 - Store **`actor_name`** in `make_event()` to avoid user lookups in timelines/analytics.
 - Consider splitting `app.py` into blueprints as it grows.
 
-**Security** — see the prioritized checklist in [§8](#8-security--gaps--missing-controls).
+**Security** — the audit findings are fixed ([§8](#8-security--controls-production-settings--residual-risks)). Next: drop `'unsafe-inline'` from the CSP by moving inline `<script>` blocks and `onclick=` handlers into static JS ([§8.3](#83-residual-risks-accepted-or-tracked)); bring the verification probes into the repo as an automated test suite.
+
+**Operations** — schedule backups and media cleanup ([§16.4](#164-scheduled-maintenance--use-the-os-scheduler)); load-test the multi-process path on staging before it is needed ([§9.6](#96-scaling-out--more-than-one-process)).
 
 **Performance / scale** - superseded by [§15](#15-performance-scale--the-media-pipeline), which carries the measured baseline and the ordered remediation plan. Start there.
 
@@ -535,7 +841,7 @@ camera constraints or `toDataURL` quality in a template** — both ends must fol
 
 ### 15.5 Remediation plan
 
-Ordered by payoff per unit of risk. Items 1 is done; the rest are the forward plan.
+Ordered by payoff per unit of risk. The status of every item is in [15.7](#157-current-status).
 
 **1. Apply the indexes. — DONE 2026-09-26.** `python scripts/create_indexes.py`. Idempotent, safe to re-run.
 Run it on every environment, including production. (Two bugs in the tooling were fixed at the same time:
@@ -624,25 +930,7 @@ pipeline = [
 ]
 ```
 
-**9. Run a real server, and make multi-process possible.** `async_mode='threading'` on the Werkzeug dev
-server is the hard ceiling. Move to gevent (already installed) and add a Redis message queue so Socket.IO
-rooms are shared across workers:
-
-```python
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='gevent',
-                    message_queue=os.environ.get('SOCKETIO_MESSAGE_QUEUE'))  # redis://...
-```
-
-```
-gunicorn -k geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 4 app:app
-```
-
-**Without `message_queue`, more than one worker is silently broken** — a broadcast only reaches clients
-connected to the worker that emitted it. Do not add workers before adding the queue. Note §9's existing
-warning: do not use the ops console's "Waitress Service" option, which breaks WebSockets.
-
-Also raise the Mongo pool to match worker concurrency:
-`MONGO_URI=...?maxPoolSize=200&minPoolSize=10&waitQueueTimeoutMS=5000`.
+**9. Run a real server. — DONE 2026-09-28.** gevent is the production server, measured in [§9.5](#95-capacity--sizing--how-many-workers): one process holds 300 sockets on 12 OS threads, and CPU-heavy work runs off the event loop. The command originally proposed here, `gunicorn ... -w 4`, would have broken Socket.IO: gunicorn is not sticky, so a session's requests land on different workers. The scale-out path (one worker per instance, a message queue, a sticky proxy) is [§9.6](#96-scaling-out--more-than-one-process); gunicorn itself is Linux-only ([§9.7](#97-linux-alternative-gunicorn)).
 
 **10. Aggregations for analytics.** Several analytics endpoints pull documents into Python and iterate.
 Move to `$group`/`$avg`/`$sum` pipelines (already flagged in §14).
@@ -714,14 +1002,17 @@ Re-measured 2026-09-26 after the work below, same dataset (207 trackers, 526 cha
 | Analytics projection (drops `events[]` where unused) | Done - output verified identical on 8 endpoints |
 | `tracker_id` atomic counter + seeding | Done - 8 parallel creates gave 8 distinct ids |
 | `sdwan_id` `DuplicateKeyError` -> 409 | Done |
-| Configurable async mode + `message_queue` + Mongo pool | Done (config only - not load-tested) |
+| Configurable async mode + `message_queue` + Mongo pool | Done - gevent measured ([§9.5](#95-capacity--sizing--how-many-workers)); the Redis path is configured, not load-tested |
 | Dashboards fetch one page per tab (`?filter=`) + counts | Done - 1,374-check equivalence harness, 0 mismatches; real-browser regression, 0 failures |
 | Dashboard search on the server (`/api/trackers/search`) | Done - literal substring, never a regex |
 | Stored XSS on dashboards | Fixed - see section 8 |
 | Script-capable media served inline | Fixed - see section 8 |
 | Orphaned tracker ownership | Repaired - see 15.9 |
 | **Analytics as aggregation pipelines** | **Pending - see below** |
-| **Production deployment on gevent + Redis** | **Pending - needs infrastructure** |
+| Production server: gevent as a Windows service | Done - [§9](#9-production-deployment--windows-primary--linux) |
+| Security hardening | Done - [§8](#8-security--controls-production-settings--residual-risks) |
+| Real-time resilience (reconnect, catch-up) | Done - [§5](#5-real-time-socketio--architecture--robustness) |
+| **More than one process (Redis + sticky proxy)** | **Documented ([§9.6](#96-scaling-out--more-than-one-process)); not needed at current scale; not load-tested** |
 
 ### 15.8 What is deliberately still open
 
@@ -731,13 +1022,11 @@ Converting the KPI maths to `$group`/`$avg` pipelines changes numbers the busine
 before/after comparison per endpoint - the harness used here (capture every analytics response, diff after
 the change) is the right way to do it safely.
 
-**The production serving model is configured but unproven.** `SOCKETIO_ASYNC_MODE`,
-`SOCKETIO_MESSAGE_QUEUE` and the Mongo pool settings are wired and the app warns on startup when it is
-running single-process, but nothing here has been run under gevent, behind gunicorn, or against Redis.
-That needs a staging environment and a load test before it can be called done.
-
-**Security has not been touched.** See [section 8](#8-security--gaps--missing-controls). Performance work
-does not make the app production-ready on its own.
+**The multi-process path is unproven.** gevent itself is measured ([§9.5](#95-capacity--sizing--how-many-workers))
+and is the production server. Running more than one process, with a Redis message queue and a sticky proxy
+([§9.6](#96-scaling-out--more-than-one-process)), has not been exercised here: there was no Redis or Linux
+host. Load-test it on staging before relying on it. At the current ~270 accounts one process has about ten
+times the headroom needed.
 
 ### 15.9 Incident: reseed orphaned every tracker
 
@@ -781,3 +1070,71 @@ equivalent rather than eyeballed:
   data to compare.
 
 If a tab rule changes, change it in `bucket_query()` only - the list, counts and search all read it.
+
+---
+
+## 16. Background jobs — Celery, APScheduler & scheduled maintenance
+
+**Verdict:** the app needs no job queue today. Periodic maintenance belongs in the OS scheduler (Windows Task Scheduler; cron or systemd timers on Linux) running the existing scripts. Celery is not worth running on this Windows server, and APScheduler is usable only with care.
+
+### 16.1 What already runs in the background
+
+| Work | How it runs | Notes |
+|---|---|---|
+| Disconnect sockets of revoked sessions | In-process task every `SOCKET_SESSION_SWEEP_SECONDS` (60) | One per process, each sweeping its own sockets: correct with any number of processes |
+| Expire old sign-in failures and audit entries | MongoDB TTL indexes on `login_attempts` and `audit_logs` | No application job needed |
+| Password hashing, photo re-encoding | `run_blocking()` → gevent's thread pool, inside the request | 0.1–0.7 s; the user is waiting for the result anyway |
+| Orphaned-media cleanup, backups | By hand today | Schedule them: 16.4 |
+
+### 16.2 Celery — not recommended here
+
+- Celery has not supported Windows since version 4: its default worker pool relies on `fork`. It can be forced to run (`-P solo` or `-P threads`), but that is unsupported for production.
+- It adds a broker (Redis or RabbitMQ), a worker service and a result backend: three more things to run, secure, back up and monitor on the server.
+- Nothing in the app needs it. No request does more than about a second of work, nothing needs retries or distribution across machines, and the CPU-heavy parts already run off the event loop.
+
+**Revisit when** a user-triggered task takes longer than ~10 s (very large analytics exports, generated PDF reports), or outbound work needs retries (email, SMS, push notifications). Then run the workers on Linux next to the Redis that the scale-out path ([§9.6](#96-scaling-out--more-than-one-process)) brings anyway, with Celery or the simpler RQ.
+
+### 16.3 APScheduler — feasible for small periodic jobs, with two caveats
+
+APScheduler runs jobs inside the web process (`GeventScheduler` under gevent, `BackgroundScheduler` under threading):
+
+- **Every process runs every job.** With one process that is fine. With more (9.6, or gunicorn workers) each job runs *N* times unless it takes a lock first, for example a lease document in MongoDB claimed with `find_one_and_update` and an expiry time.
+- **Jobs share the web process.** A heavy job slows requests; send CPU work through `run_blocking()`.
+
+Use it only for a job that must run *inside* the app, such as one that emits Socket.IO events every few minutes (an SLA-breach alert). Even that can stay outside the web process once the message queue from 9.6 exists: a scheduled script can emit to connected clients with `SocketIO(message_queue='redis://...').emit(...)`.
+
+### 16.4 Scheduled maintenance — use the OS scheduler
+
+Task Scheduler runs each job in its own process: isolated from the app, unaffected by app restarts, with its own log, and without code changes. The scripts load `.env` from the project root themselves, so the working directory does not matter.
+
+**Nightly backup.** Save as `D:\backups\itrack_backup.ps1` (adjust the paths; keep the backup user's URI in a file only Administrators can read):
+
+```powershell
+$stamp = Get-Date -Format 'yyyyMMdd_HHmm'
+$uri = (Get-Content 'D:\backups\mongo_uri.txt' -Raw).Trim()
+& 'C:\Program Files\MongoDB\Tools\100\bin\mongodump.exe' --uri $uri --gzip --archive="D:\backups\itrack_$stamp.gz"
+Get-ChildItem 'D:\backups\itrack_*.gz' | Where-Object LastWriteTime -lt (Get-Date).AddDays(-14) | Remove-Item
+```
+
+```powershell
+schtasks /Create /TN "ITrack backup" /SC DAILY /ST 02:00 /RU SYSTEM /TR "powershell -NoProfile -ExecutionPolicy Bypass -File D:\backups\itrack_backup.ps1"
+```
+
+Restore into a scratch database to test: `mongorestore --gzip --archive=D:\backups\itrack_<stamp>.gz --nsFrom "sdwan_tracker.*" --nsTo "restore_test.*"`.
+
+**Weekly media cleanup.** Deletes GridFS files that no tracker or message references. Run it once by hand with `--gc` alone to see what it would delete. The scheduled run keeps anything younger than a day, so a tracker form left open for hours never loses its photos:
+
+```powershell
+schtasks /Create /TN "ITrack media GC" /SC WEEKLY /D SUN /ST 03:00 /RU SYSTEM /TR "cmd /c G:\srv\app\itracker\venv\Scripts\python.exe G:\srv\app\itracker\scripts\migrate_media.py --gc --apply --gc-min-age-minutes 1440 >> G:\srv\app\itracker\logs\media_gc.log 2>&1"
+```
+
+On Linux the same commands go in cron or a systemd timer.
+
+### 16.5 Which tool for which job
+
+| Need | Use |
+|---|---|
+| Periodic maintenance: backups, media cleanup, report files | OS scheduler running a script (16.4) |
+| A periodic job that must push live updates | One process: APScheduler inside the app. Several: a scheduled script emitting through the message queue |
+| A user-triggered job longer than ~10 s, or anything that needs retries | A real queue (Celery or RQ with Redis), on Linux |
+| CPU-heavy work inside a request | `run_blocking()`, already in place |

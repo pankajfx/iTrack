@@ -48,8 +48,8 @@
     <link rel="preload" href="/static/fonts/FjallaOne-Regular.ttf" as="font" type="font/ttf" crossorigin>
     <link rel="preload" href="/static/fonts/Inter-Variable.woff2" as="font" type="font/woff2" crossorigin>
     
-    <link rel="stylesheet" href="/static/css/output.css">
-    <link rel="stylesheet" href="/static/css/fonts.css">
+    <link rel="stylesheet" href="/static/css/output.css?v={{ config.STATIC_VERSION }}">
+    <link rel="stylesheet" href="/static/css/fonts.css?v={{ config.STATIC_VERSION }}">
 
     <style>
         /* Hide body until fonts are loaded to prevent FOUC */
@@ -914,7 +914,7 @@
     </script>
     
     <!-- Socket.IO for real-time updates -->
-    <script src="/static/js/vendor/socket.io.min.js"></script>
+    <script src="/static/js/vendor/socket.io.min.js?v={{ config.STATIC_VERSION }}"></script>
     <script>
         // Capture policy comes from the server (MEDIA_PROFILE) so fidelity can be
         // dialled up or down without touching the templates. See PROJECT_GUIDE §15.

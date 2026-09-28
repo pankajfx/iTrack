@@ -42,8 +42,22 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 FLASK_DEBUG = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
 app.config['TEMPLATES_AUTO_RELOAD'] = FLASK_DEBUG
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0 if FLASK_DEBUG else 31536000
-STATIC_VERSION = os.environ.get('STATIC_VERSION') or str(int(os.path.getmtime(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static', 'css', 'output.css'))))
+def _static_fingerprint():
+    """Newest modification time under static/. Any changed CSS/JS - not just
+    output.css, which this used to watch - produces a new version, so browsers
+    holding year-long cached copies fetch the new file after a deploy."""
+    root = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
+    newest = 0
+    for base, _dirs, files in os.walk(root):
+        for name in files:
+            try:
+                newest = max(newest, int(os.path.getmtime(os.path.join(base, name))))
+            except OSError:
+                pass
+    return str(newest)
+
+
+STATIC_VERSION = os.environ.get('STATIC_VERSION') or _static_fingerprint()
 
 mongo = PyMongo(app)
 # Serving model. async_mode='threading' + socketio.run() is the Werkzeug dev
@@ -227,6 +241,7 @@ def inject_config():
             'MEDIA_PROFILE': MEDIA_PROFILE,
             'CAPTURE_MAX_DIM': CAPTURE_MAX_DIM,
             'CAPTURE_QUALITY': CAPTURE_QUALITY,
+            'STATIC_VERSION': STATIC_VERSION,
         }
     }
 

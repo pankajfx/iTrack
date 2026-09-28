@@ -206,38 +206,29 @@
     let cameraStream = null;
     let capturedImageData = null;
 
-    // Socket.IO integration for real-time chat
-    let chatSocket = null;
-    
-    function initChatSocket() {
-        if (typeof io === 'undefined') {
-            console.warn('Socket.IO not loaded, falling back to polling');
-            return;
-        }
-        
-        chatSocket = io();
-        
-        // Join tracker room for real-time updates
-        chatSocket.emit('join_tracker', { tracker_id: trackerId });
-        console.log('Joined tracker room:', trackerId);
-        
-        // Listen for new chat messages
-        chatSocket.on('new_chat_message', function(data) {
-            if (data.tracker_id === trackerId) {
-                console.log('Received new chat message via Socket.IO:', data.message);
+    // Real-time chat rides the page's shared socket (base.html). It used to open
+    // a second connection of its own - doubling socket load on the server - that
+    // joined the room once and never re-joined after a reconnect, so live chat
+    // silently stopped after any network blip. onSocketReady re-runs on every
+    // (re)connect; listeners are registered once. They are registered even while
+    // chat is locked, so an unlock arrives live.
+    var _chatListenersAdded = false;
+    window.onSocketReady(function () {
+        window.socket.emit('join_tracker', { tracker_id: trackerId });
+        if (_chatListenersAdded) return;
+        _chatListenersAdded = true;
+        window.socket.on('new_chat_message', function (data) {
+            // The sender also receives their own message here and via reload;
+            // show each message once.
+            if (data.tracker_id === trackerId &&
+                    !chatMessages.some(function (m) { return m._id === data.message._id; })) {
                 appendNewMessage(data.message);
             }
         });
-        
-        // Listen for tracker updates (status changes, assignments)
-        chatSocket.on('tracker_update', function(data) {
-            if (data.tracker_id === trackerId) {
-                console.log('Tracker updated via Socket.IO:', data);
-                // Reload chat to check if it's now unlocked
-                loadChat();
-            }
+        window.socket.on('tracker_update', function (data) {
+            if (data.tracker_id === trackerId) loadChat();   // may have unlocked
         });
-    }
+    });
     
     function appendNewMessage(message) {
         const container = document.getElementById('chat-messages');
@@ -309,10 +300,6 @@
                     await fetch(`/api/trackers/${trackerId}/chat/mark-read`, { method: 'POST' });
                 }
                 
-                // Initialize Socket.IO for real-time updates
-                if (!chatSocket) {
-                    initChatSocket();
-                }
             } else {
                 console.log('Chat is locked, showing locked message');
                 document.getElementById('chat-locked').classList.remove('hidden');

@@ -946,7 +946,9 @@
             }
         }
 
-        // Connect immediately — io() is available because the CDN script above already ran.
+        // Only signed-in pages get a socket: the server refuses anonymous ones.
+        {% if session.get('user_id') %}
+        // Connect immediately - io() is available because the script above already ran.
         window.socket = io({
             transports: ['websocket', 'polling'],
             reconnection: true,
@@ -971,7 +973,20 @@
         window.socket.on('connect_error', function(err) {
             console.error('[Socket.IO] Connection error:', err.message);
             _updateSocketStatus(false);
+            // Refused because the session ended (expired, revoked, account removed).
+            if (err && err.message === 'auth_required') _sessionEnded();
         });
+
+        // The admin panel revoked this account's sessions.
+        window.socket.on('session_ended', _sessionEnded);
+
+        function _sessionEnded() {
+            if (window.__redirectingToLogin) return;
+            window.__redirectingToLogin = true;
+            try { window.socket.disconnect(); } catch (e) {}
+            window.location.href = '/login?expired=1';
+        }
+        {% endif %}
     </script>
 
     {% block extra_js %}{% endblock %}

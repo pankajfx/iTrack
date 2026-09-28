@@ -2,6 +2,9 @@ from flask import Flask, render_template, request, jsonify, session, redirect, u
 from flask_pymongo import PyMongo
 from flask.sessions import SecureCookieSessionInterface
 from flask_socketio import SocketIO, emit, join_room, leave_room
+# Socket.IO's own class: the built-in ConnectionRefusedError is not caught by
+# python-socketio, so it logs a traceback and the client never gets the reason.
+from flask_socketio import ConnectionRefusedError
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 from datetime import datetime, timezone, timedelta
@@ -88,10 +91,21 @@ mongo = PyMongo(app)
 SOCKETIO_ASYNC_MODE    = os.environ.get('SOCKETIO_ASYNC_MODE', 'threading')
 SOCKETIO_MESSAGE_QUEUE = os.environ.get('SOCKETIO_MESSAGE_QUEUE') or None
 
+# Which origins may open a socket. Unset (the default) means same origin only;
+# Engine.IO also accepts the X-Forwarded-Proto/X-Forwarded-Host form that Caddy and
+# the generated Nginx config send, so it works behind the proxy. It used to be '*',
+# which let any website a signed-in user visited open a socket with their cookie.
+# CORS_ORIGINS='*' restores that deliberately; a comma list names exact origins.
+_origins_env = os.environ.get('CORS_ORIGINS', '').strip()
+SOCKET_ALLOWED_ORIGINS = ('*' if _origins_env == '*' else
+                          [o.strip().rstrip('/') for o in _origins_env.split(',') if o.strip()] or None)
+
 socketio = SocketIO(app,
-                    cors_allowed_origins=os.environ.get('CORS_ORIGINS', '*'),
+                    cors_allowed_origins=SOCKET_ALLOWED_ORIGINS,
                     async_mode=SOCKETIO_ASYNC_MODE,
-                    message_queue=SOCKETIO_MESSAGE_QUEUE)
+                    message_queue=SOCKETIO_MESSAGE_QUEUE,
+                    # Clients only ever send tiny join/leave events.
+                    max_http_buffer_size=64 * 1024)
 
 # ─── Jinja2 template filters ───────────────────────────────────────────────
 @app.template_filter('display_name')
@@ -4558,6 +4572,10 @@ def admin_update_user(user_id):
     if revoke:
         update['$inc'] = {'session_epoch': 1}
     mongo.db.users.update_one({'_id': oid}, update)
+    if revoke:
+        # Pages listening on this user's channel sign out at once; the socket
+        # sweep disconnects any client that ignores the event.
+        socketio.emit('session_ended', {}, room=f"user_{user_id}")
     audit('user_updated', user_id=user_id, username=user.get('username'),
           fields=sorted(k for k in set_ops if k not in ('password', 'updated_at')),
           password_changed=bool(password), sessions_revoked=revoke)
@@ -4567,52 +4585,92 @@ def admin_update_user(user_id):
 # ─── Socket.IO Event Handlers ───────────────────────────────────────────────
 # These handlers manage real-time WebSocket connections for instant updates
 
+# Every socket belongs to a signed-in user, and every room is joined on the
+# server's authority - never the client's say-so. Before this, anyone could
+# connect without logging in, join tracker_<any id> and receive that tracker's
+# full live updates and chat, or claim any role on join_dashboard.
+_socket_users = {}            # sid -> (user_id, session_epoch) for sockets on THIS process
+_socket_sweeper_started = False
+SOCKET_SESSION_SWEEP_SECONDS = _env_int('SOCKET_SESSION_SWEEP_SECONDS', 60)
+
+
+def _socket_session_sweeper():
+    """Disconnect this process's sockets whose account was deleted, deactivated
+    or had its sessions revoked. HTTP requests re-check on every call; a socket
+    only checks at connect, so without this a revoked user could keep receiving
+    live updates for as long as their socket stayed open."""
+    while True:
+        socketio.sleep(SOCKET_SESSION_SWEEP_SECONDS)
+        try:
+            pairs = list(_socket_users.items())
+            if not pairs:
+                continue
+            with app.app_context():
+                ids = [oid for oid in {parse_oid(uid) for _, (uid, _) in pairs} if oid]
+                state = {str(d['_id']): d for d in mongo.db.users.find(
+                    {'_id': {'$in': ids}}, {'active': 1, 'session_epoch': 1})}
+            for sid, (uid, epoch) in pairs:
+                doc = state.get(uid)
+                if not doc or doc.get('active') is False or doc.get('session_epoch', 0) != epoch:
+                    _socket_users.pop(sid, None)
+                    socketio.server.disconnect(sid, namespace='/')
+        except Exception as exc:
+            print(f"[socket] session sweep failed: {exc!r}")
+
+
 @socketio.on('connect')
-def handle_connect():
-    """Client connected to WebSocket"""
-    print(f"Client connected: {request.sid}")
+def handle_connect(auth=None):
+    """Only a valid signed-in session gets a socket. The refusal reason
+    ('auth_required') lets the page send the user to the login screen."""
+    global _socket_sweeper_started
+    if 'user_id' not in session or not session_user_valid():
+        raise ConnectionRefusedError('auth_required')
+    _socket_users[request.sid] = (session['user_id'], session.get('epoch', 0))
+    # Personal channel: notifications and 'session_ended'.
+    join_room(f"user_{session['user_id']}")
+    if not _socket_sweeper_started:
+        _socket_sweeper_started = True
+        socketio.start_background_task(_socket_session_sweeper)
+
 
 @socketio.on('disconnect')
 def handle_disconnect():
-    """Client disconnected from WebSocket"""
-    print(f"Client disconnected: {request.sid}")
+    _socket_users.pop(request.sid, None)
+
 
 @socketio.on('join_tracker')
 def handle_join_tracker(data):
-    """User joins a tracker room to receive real-time updates for that tracker"""
-    tracker_id = data.get('tracker_id')
-    if tracker_id:
-        join_room(f"tracker_{tracker_id}")
-        print(f"Client {request.sid} joined tracker_{tracker_id}")
+    """Join a tracker's live room - only if the caller may see that tracker,
+    by the same rule as the REST API (visible_tracker)."""
+    tracker_id = data.get('tracker_id') if isinstance(data, dict) else None
+    if not session_user_valid() or visible_tracker(tracker_id, {'_id': 1}) is None:
+        return {'ok': False}
+    join_room(f"tracker_{tracker_id}")
+    return {'ok': True}
+
 
 @socketio.on('leave_tracker')
 def handle_leave_tracker(data):
-    """User leaves a tracker room"""
-    tracker_id = data.get('tracker_id')
+    tracker_id = data.get('tracker_id') if isinstance(data, dict) else None
     if tracker_id:
         leave_room(f"tracker_{tracker_id}")
-        print(f"Client {request.sid} left tracker_{tracker_id}")
+
 
 @socketio.on('join_dashboard')
-def handle_join_dashboard(data):
-    """User joins their dashboard room to receive tracker list updates"""
-    user_id = data.get('user_id')
-    role = data.get('role')
-    if user_id and role:
-        # Join role-specific room for dashboard updates
+def handle_join_dashboard(data=None):
+    """Dashboard rooms come from the session. The client still sends its role
+    and user_id, but they are ignored - trusting them let any user claim any
+    role and receive that role's dashboard traffic."""
+    role = session.get('role')
+    if role and session_user_valid():
         join_room(f"dashboard_{role}")
-        join_room(f"user_{user_id}")
-        print(f"Client {request.sid} joined dashboard_{role} and user_{user_id}")
+
 
 @socketio.on('leave_dashboard')
-def handle_leave_dashboard(data):
-    """User leaves dashboard room"""
-    user_id = data.get('user_id')
-    role = data.get('role')
-    if user_id and role:
+def handle_leave_dashboard(data=None):
+    role = session.get('role')
+    if role:
         leave_room(f"dashboard_{role}")
-        leave_room(f"user_{user_id}")
-        print(f"Client {request.sid} left dashboard_{role} and user_{user_id}")
 
 
 # ─── Helper Functions for Broadcasting ──────────────────────────────────────
@@ -4638,7 +4696,11 @@ def broadcast_tracker_update(tracker_id, event_type, data, include_full_tracker=
         try:
             tracker = mongo.db.trackers.find_one({'_id': ObjectId(tracker_id)})
             if tracker:
-                payload['tracker'] = serialize_doc(tracker)
+                # Pages re-render straight from this payload, so image references
+                # must be resolved to /api/media URLs exactly as the REST detail
+                # endpoint does - raw GridFS references blanked every photo on
+                # the first live update.
+                payload['tracker'] = resolve_tracker_media(serialize_doc(tracker))
                 print(f"[Socket.IO] Broadcasting tracker_update with full data: tracker_id={tracker_id}, event_type={event_type}")
             else:
                 print(f"[Socket.IO] Broadcasting tracker_update (tracker not found): tracker_id={tracker_id}, event_type={event_type}")
@@ -4670,12 +4732,16 @@ def broadcast_chat_message(tracker_id, message):
     }, room=f"tracker_{tracker_id}")
 
 def broadcast_dashboard_update(role, event_type, data):
-    """Broadcast dashboard updates to all users of a specific role"""
-    print(f"[Socket.IO] Broadcasting dashboard_update: role={role}, event_type={event_type}")
-    socketio.emit('dashboard_update', {
-        'event_type': event_type,
-        'data': data
-    }, room=f"dashboard_{role}")
+    """Tell every open dashboard of `role` that something changed.
+
+    Dashboards re-query their own, scoped data on this signal, so it carries no
+    tracker contents. It used to include customer names - and at one call site
+    the whole tracker - delivered to every user of the role regardless of which
+    trackers they may see.
+    """
+    tracker_id = data.get('tracker_id') if isinstance(data, dict) else None
+    socketio.emit('dashboard_update', {'event_type': event_type, 'tracker_id': tracker_id},
+                  room=f"dashboard_{role}")
 
 def broadcast_to_user(user_id, event_type, data):
     """Broadcast notification to a specific user"""

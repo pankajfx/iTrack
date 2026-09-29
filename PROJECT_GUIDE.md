@@ -352,7 +352,7 @@ Acknowledged delivery with server-side replay was considered and rejected: it ne
    ```powershell
    python -m pip download -r Requirements.txt -d exec_prod\wheels --only-binary=:all: --platform win_amd64 --python-version 3.11 --implementation cp
    ```
-   **Do this before the next deploy.** On 2026-09-28 the folder held six wheels (dnspython, eventlet, greenlet, h11, simple_websocket, wsproto) and none of gevent's. The machine that wrote this guide could not reach PyPI.
+   As of 2026-09-29 the folder holds the complete set (29 wheels, ~7 MB, for Python 3.11 x64), verified by a clean `--no-index` install into a fresh venv. Re-run the command above whenever `Requirements.txt` changes, on a machine that can reach PyPI, and copy the folder to the server.
 3. **Virtual environment:**
    ```powershell
    py -3.11 -m venv venv
